@@ -63,7 +63,13 @@ function criteriaFor(tree: ArborTree): SuccessCriterion[] {
   return fromBrief.length ? fromBrief : criteriaFromLabels(tree.labels);
 }
 
-function buildPrompt(tree: ArborTree, recalled: string[], lastFailure: VerifierResult | null, guidance: string[] = []): string {
+function buildPrompt(
+  tree: ArborTree,
+  recalled: string[],
+  lastFailure: VerifierResult | null,
+  guidance: string[] = [],
+  skills: string[] = [],
+): string {
   const { labels } = tree;
   const parts: string[] = [
     `You are an autonomous engineering agent working inside a sandboxed checkout of a repository.`,
@@ -85,6 +91,9 @@ function buildPrompt(tree: ArborTree, recalled: string[], lastFailure: VerifierR
   }
   if (guidance.length) {
     parts.push(``, `## Guidance from the operator (given mid-run — follow it)`, ...guidance.map((g) => `- ${g}`));
+  }
+  if (skills.length) {
+    parts.push(``, `## Skills (proven procedures from past runs — apply when relevant)`, ...skills.map((s) => `- ${s}`));
   }
   if (lastFailure) {
     parts.push(
@@ -179,15 +188,16 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
     const startedAt = new Date().toISOString();
     ticksRun = iteration;
 
-    // T1 — harness loads context
+    // T1 — harness loads context: brief, recalled memory, mounted skills
     events.emit({ type: "stage", n: 1, label: "load context" });
-    const recalledHits = memory.recall(tree.labels.goal, 5);
+    const recalledHits = await memory.recall(tree.labels.goal, 5);
     const recalled = recalledHits.map((h) => `${h.name}: ${h.text}`);
+    const skills = files.listSkills().slice(0, 5).map((s) => `${s.name}: ${s.text.slice(0, 400)}`);
     events.emit({
       type: "thought",
       owner: "harness",
       layer: "harness",
-      text: `brief loaded; ${recalledHits.length} memory entr${recalledHits.length === 1 ? "y" : "ies"} recalled`,
+      text: `brief loaded; ${recalledHits.length} memory entr${recalledHits.length === 1 ? "y" : "ies"} recalled; ${skills.length} skill${skills.length === 1 ? "" : "s"} mounted`,
     });
 
     // T2 — plan: ceiling test decides wide (swarm fan-out) vs sequential.
@@ -202,7 +212,7 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
         {
           goal: tree.labels.goal,
           criteria,
-          context: [...tree.labels.context, ...guidance],
+          context: [...tree.labels.context, ...guidance, ...skills.map((s) => `skill: ${s}`)],
           outOfScope: tree.labels.out_of_scope,
           recalled,
           lastFailureSummary: lastFailure
@@ -254,7 +264,7 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
       agentResult = { summary: wide.summary, costUsd: wide.costUsd, tokens: wide.tokens };
     } else {
       events.emit({ type: "status", agent: executor.name, state: "running", task: tree.labels.goal });
-      const prompt = buildPrompt(tree, recalled, lastFailure, guidance);
+      const prompt = buildPrompt(tree, recalled, lastFailure, guidance, skills);
       agentResult = await executor.execute({
         prompt,
         cwd: sandbox.dir,
@@ -367,7 +377,7 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
       tags: [verifierResult.verdict, "auto"],
       source_tick: tickNumber,
     });
-    memory.crystallize({ name: entry.name, text: entry.text, tags: entry.tags, source_tick: tickNumber });
+    await memory.crystallize({ name: entry.name, text: entry.text, tags: entry.tags, source_tick: tickNumber });
 
     const record: TickRecord = {
       tick: tickNumber,

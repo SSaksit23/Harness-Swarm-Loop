@@ -23,8 +23,21 @@ npm test                      # unit + e2e (offline, mock agent)
 # Real run against a repo (needs ANTHROPIC_API_KEY):
 npm run arbor -- init   -C path/to/repo
 npm run arbor -- plant  -C path/to/repo "make the test suite green, stop at $5"
-npm run arbor -- run    -C path/to/repo
+npm run arbor -- run    -C path/to/repo            # add --swarm for orchestrator + parallel workers
+npm run arbor -- watch  -C path/to/repo --every 30 # cron-style: re-check the metric, loop only on failure
+
+# Compounding:
+npm run arbor -- curate -C path/to/repo            # promote lessons recalled 3+ times into skills
+npm run arbor -- skills ls -C path/to/repo
+
+# Workbench UI:
+npm run arbor -- serve  -C path/to/repo            # API + built UI on http://localhost:4177
+npm run dev -w apps/workbench                      # hot-reloading dev UI on http://localhost:5177
 ```
+
+Memory tier: SQLite by default (`arbor/index.db`, zero setup). Set `ARBOR_MONGODB_URI`
+(and optionally `ARBOR_MONGODB_DB`) to move the memory index to MongoDB — the files
+under `arbor/` remain the source of truth either way.
 
 ## Control invariants
 

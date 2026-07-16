@@ -2,8 +2,8 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { Command } from "commander";
 import pc from "picocolors";
-import { defaultTree, validateInvariants } from "@arbor/schema";
-import { FileStore, SqliteMemoryStore } from "@arbor/store";
+import { criteriaFromLabels, defaultTree, validateInvariants } from "@arbor/schema";
+import { FileStore, openMemoryStore } from "@arbor/store";
 import {
   EventBus,
   InvariantError,
@@ -12,6 +12,8 @@ import {
   ScriptedAgent,
   SdkAgent,
   compileLabels,
+  curate,
+  runChecks,
   runLoop,
   type ArborEvent,
   type SwarmOptions,
@@ -71,10 +73,10 @@ function renderEvent(e: ArborEvent): void {
   }
 }
 
-function stores(dir: string) {
+async function stores(dir: string) {
   const files = new FileStore(path.resolve(dir));
   files.init(); // idempotent — the DB lives inside arbor/, which must exist first
-  const memory = new SqliteMemoryStore(files.dbPath, path.basename(path.resolve(dir)));
+  const memory = await openMemoryStore(files, path.basename(path.resolve(dir)));
   return { files, memory };
 }
 
@@ -102,7 +104,7 @@ program
   .option("-y, --yes", "accept flagged labels without prompting", false)
   .action(async (missionWords: string[], opts: { fixture: boolean; yes: boolean }) => {
     const dir = path.resolve(program.opts().dir);
-    const { files, memory } = stores(dir);
+    const { files, memory } = await stores(dir);
     const mission = missionWords.join(" ");
 
     console.log(pc.dim(`compiling labels from: "${mission}"`));
@@ -121,7 +123,7 @@ program
       if (answer !== "y" && answer !== "yes") {
         console.log(pc.red("not planted — re-run plant with a more specific mission, or edit arbor/tree/tree.json"));
         process.exitCode = 1;
-        memory.close();
+        await memory.close();
         return;
       }
     }
@@ -132,11 +134,11 @@ program
       console.error(pc.red("compiled tree violates control invariants:"));
       for (const v of violations) console.error(pc.red(`  [rule ${v.rule}] ${v.message}`));
       process.exitCode = 1;
-      memory.close();
+      await memory.close();
       return;
     }
     files.writeTree(tree);
-    memory.close();
+    await memory.close();
     console.log(pc.green(`\nplanted ${path.join(files.treeDir, "tree.json")}`));
     console.log(pc.dim("next: arbor run"));
   });
@@ -151,7 +153,7 @@ program
   .option("--no-sandbox", "run in place instead of a git worktree")
   .action(async (opts: { mock: boolean; model: string; swarm: boolean; workers: string; sandbox: boolean }) => {
     const dir = path.resolve(program.opts().dir);
-    const { files, memory } = stores(dir);
+    const { files, memory } = await stores(dir);
     const tree = files.readTree();
 
     const events = new EventBus();
@@ -160,7 +162,7 @@ program
     if (opts.mock && opts.swarm) {
       console.error(pc.red("--mock and --swarm cannot be combined (the mock agent exists to exercise the hard stops)"));
       process.exitCode = 1;
-      memory.close();
+      await memory.close();
       return;
     }
 
@@ -211,19 +213,76 @@ program
         throw err;
       }
     } finally {
-      memory.close();
+      await memory.close();
+    }
+  });
+
+program
+  .command("watch")
+  .description("cron-style trigger: re-check the metric on an interval and run the loop only when it fails")
+  .option("--every <minutes>", "minutes between checks", "30")
+  .option("--mock", "use the no-op scripted agent", false)
+  .option("--model <id>", "model for the real agent", MODEL_TIERS.premium)
+  .action(async (opts: { every: string; mock: boolean; model: string }) => {
+    const dir = path.resolve(program.opts().dir);
+    const { files, memory } = await stores(dir);
+    const intervalMs = Math.max(1, Number(opts.every) || 30) * 60_000;
+    console.log(pc.bold(`watching ${path.basename(dir)}`) + pc.dim(` — verifier check every ${opts.every} min; loop engages only on failure (Ctrl+C to stop)`));
+    try {
+      for (;;) {
+        const tree = files.readTree();
+        const check = await runChecks(criteriaFromLabels(tree.labels), dir);
+        if (check.verdict === "pass") {
+          console.log(pc.green(`${new Date().toLocaleTimeString()} all green — sleeping ${opts.every} min`));
+        } else {
+          console.log(pc.yellow(`${new Date().toLocaleTimeString()} verifier failing — engaging the loop`));
+          const events = new EventBus();
+          events.on(renderEvent);
+          const executor = opts.mock ? new ScriptedAgent([], 0.25) : new SdkAgent(opts.model);
+          await runLoop({ projectDir: dir, tree, files, memory, executor, events });
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+    } finally {
+      await memory.close();
+    }
+  });
+
+program
+  .command("curate")
+  .description("compounding pass: promote heavily-recalled lessons to skills, surface (or prune) dead memory")
+  .option("--min-usage <n>", "recalls needed before a lesson becomes a skill", "3")
+  .option("--prune", "delete never-recalled entries older than --stale-days", false)
+  .option("--stale-days <n>", "age threshold for pruning", "14")
+  .action(async (opts: { minUsage: string; prune: boolean; staleDays: string }) => {
+    const dir = path.resolve(program.opts().dir);
+    const { files, memory } = await stores(dir);
+    try {
+      const report = await curate(files, memory, {
+        minUsageForSkill: Math.max(1, Number(opts.minUsage) || 3),
+        prune: opts.prune,
+        pruneAfterDays: Math.max(0, Number(opts.staleDays) || 14),
+      });
+      console.log(pc.bold("curation report"));
+      console.log(`  memory entries: ${report.memory_entries} · skills: ${report.skills_total}`);
+      if (report.promoted.length) console.log(pc.green(`  promoted to skills: ${report.promoted.join(", ")}`));
+      if (report.pruned.length) console.log(pc.red(`  pruned: ${report.pruned.join(", ")}`));
+      if (report.stale.length) console.log(pc.yellow(`  stale (never recalled — re-run with --prune to delete): ${report.stale.join(", ")}`));
+      if (!report.promoted.length && !report.stale.length && !report.pruned.length) console.log(pc.dim("  nothing to do — the library is clean"));
+    } finally {
+      await memory.close();
     }
   });
 
 program
   .command("status")
   .description("summarize the planted tree and the last run")
-  .action(() => {
+  .action(async () => {
     const dir = path.resolve(program.opts().dir);
-    const { files, memory } = stores(dir);
+    const { files, memory } = await stores(dir);
     if (!files.hasTree()) {
       console.log(pc.dim("no tree planted — run `arbor plant` first"));
-      memory.close();
+      await memory.close();
       return;
     }
     const tree = files.readTree();
@@ -236,8 +295,39 @@ program
       const last = ticks.at(-1)!;
       console.log(pc.bold(`last tick: `) + `#${last.tick} — verifier ${last.verifier.verdict}, decision ${last.loop_decision}, total spend $${last.spend_total_usd.toFixed(2)}`);
     }
-    console.log(pc.bold(`memory entries: `) + String(memory.count()));
-    memory.close();
+    console.log(pc.bold(`memory entries: `) + String(await memory.count()));
+    console.log(pc.bold(`skills: `) + String(files.listSkills().length));
+    await memory.close();
+  });
+
+const skillsCmd = program.command("skills").description("inspect promoted skills");
+skillsCmd
+  .command("ls")
+  .description("list skills")
+  .action(() => {
+    const dir = path.resolve(program.opts().dir);
+    const files = new FileStore(dir);
+    const entries = files.listSkills();
+    if (!entries.length) {
+      console.log(pc.dim("no skills yet — run `arbor curate` after a few runs to promote repeated lessons"));
+      return;
+    }
+    for (const e of entries) console.log(`${pc.bold(e.name)} ${pc.dim(`[${e.tags.join(", ")}]`)}`);
+  });
+skillsCmd
+  .command("show <name>")
+  .description("print one skill")
+  .action((name: string) => {
+    const dir = path.resolve(program.opts().dir);
+    const files = new FileStore(dir);
+    const entry = files.listSkills().find((e) => e.name === name);
+    if (!entry) {
+      console.error(pc.red(`no skill named "${name}"`));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(pc.bold(entry.name) + pc.dim(` (${entry.created_at})`));
+    console.log(entry.text);
   });
 
 program

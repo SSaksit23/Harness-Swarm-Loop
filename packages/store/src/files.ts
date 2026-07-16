@@ -96,6 +96,35 @@ export class FileStore {
 
   /** One fact per file, with a small frontmatter header. */
   writeMemoryEntry(entry: Omit<MemoryEntryFile, "created_at">): MemoryEntryFile {
+    return this.writeEntry(this.memoryDir, entry);
+  }
+
+  listMemoryEntries(): MemoryEntryFile[] {
+    return this.listEntries(this.memoryDir);
+  }
+
+  deleteMemoryEntry(name: string): boolean {
+    const file = path.join(this.memoryDir, `${name}.md`);
+    if (!fs.existsSync(file)) return false;
+    fs.rmSync(file);
+    return true;
+  }
+
+  /** Skills: proven procedures promoted from repeated lessons. Same format as memory. */
+  writeSkill(entry: Omit<MemoryEntryFile, "created_at">): MemoryEntryFile {
+    return this.writeEntry(this.skillsDir, entry);
+  }
+
+  listSkills(): MemoryEntryFile[] {
+    return this.listEntries(this.skillsDir);
+  }
+
+  hasSkill(name: string): boolean {
+    const safe = name.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+    return fs.existsSync(path.join(this.skillsDir, `${safe}.md`));
+  }
+
+  private writeEntry(dir: string, entry: Omit<MemoryEntryFile, "created_at">): MemoryEntryFile {
     const full: MemoryEntryFile = { ...entry, created_at: new Date().toISOString() };
     const safe = full.name.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
     const body = [
@@ -109,20 +138,20 @@ export class FileStore {
       full.text,
       "",
     ].join("\n");
-    fs.writeFileSync(path.join(this.memoryDir, `${safe}.md`), body);
+    fs.writeFileSync(path.join(dir, `${safe}.md`), body);
     return { ...full, name: safe };
   }
 
-  listMemoryEntries(): MemoryEntryFile[] {
-    if (!fs.existsSync(this.memoryDir)) return [];
+  private listEntries(dir: string): MemoryEntryFile[] {
+    if (!fs.existsSync(dir)) return [];
     const out: MemoryEntryFile[] = [];
-    for (const f of fs.readdirSync(this.memoryDir).filter((f) => f.endsWith(".md")).sort()) {
-      const raw = fs.readFileSync(path.join(this.memoryDir, f), "utf8");
-      const m = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort()) {
+      const raw = fs.readFileSync(path.join(dir, f), "utf8");
+      const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
       if (!m) continue;
       const meta = Object.fromEntries(
         m[1]
-          .split("\n")
+          .split(/\r?\n/)
           .map((line) => {
             const i = line.indexOf(":");
             return i === -1 ? null : [line.slice(0, i).trim(), line.slice(i + 1).trim()];

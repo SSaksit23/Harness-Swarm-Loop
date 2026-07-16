@@ -63,7 +63,7 @@ describe("e2e: plant + run on the demo repo", () => {
     expect(ticks[1].crystallized.length).toBeGreaterThan(0);
 
     // a second, similar mission recalls the crystallized lesson
-    const hits = memory.recall("make the test suite green");
+    const hits = await memory.recall("make the test suite green");
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].text).toContain("test suite green");
   });

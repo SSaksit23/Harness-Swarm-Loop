@@ -81,7 +81,22 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ nodeId }),
     }),
+  skills: () => jsonFetch<Array<Omit<MemoryEntry, "usage_count" | "last_used">>>("/api/skills"),
+  curate: (prune: boolean) =>
+    jsonFetch<CurationReport>("/api/curate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prune }),
+    }),
 };
+
+export interface CurationReport {
+  memory_entries: number;
+  skills_total: number;
+  promoted: string[];
+  stale: string[];
+  pruned: string[];
+}
 
 /**
  * One shared WebSocket, fanned out synchronously to every subscriber. Do NOT

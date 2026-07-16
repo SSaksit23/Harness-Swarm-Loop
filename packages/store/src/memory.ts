@@ -18,13 +18,25 @@ export interface CrystallizeInput {
   source_tick?: number | null;
 }
 
+export interface IndexedRow {
+  name: string;
+  usage_count: number;
+  last_used: string | null;
+  source_tick: number | null;
+}
+
+/**
+ * Async by contract so document-store adapters (MongoDB) fit behind the same
+ * interface as the embedded SQLite default.
+ */
 export interface MemoryStore {
-  crystallize(entry: CrystallizeInput): number;
+  crystallize(entry: CrystallizeInput): Promise<number>;
   /** Hybrid recall: 0.7 * cosine(embedding) + 0.3 * keyword score. Bumps usage on hits. */
-  recall(query: string, k?: number): MemoryHit[];
-  rebuildIndex(files: FileStore): void;
-  count(): number;
-  close(): void;
+  recall(query: string, k?: number): Promise<MemoryHit[]>;
+  rebuildIndex(files: FileStore): Promise<void>;
+  listIndexed(): Promise<IndexedRow[]>;
+  count(): Promise<number>;
+  close(): Promise<void>;
 }
 
 /**
@@ -72,7 +84,7 @@ export class SqliteMemoryStore implements MemoryStore {
     `);
   }
 
-  crystallize(entry: CrystallizeInput): number {
+  async crystallize(entry: CrystallizeInput): Promise<number> {
     const embedding = JSON.stringify(this.embedder.embed(`${entry.name} ${entry.text}`));
     const existing = this.db
       .prepare("SELECT id FROM memory WHERE project = ? AND name = ?")
@@ -100,7 +112,7 @@ export class SqliteMemoryStore implements MemoryStore {
     return Number(res.lastInsertRowid);
   }
 
-  recall(query: string, k = 5): MemoryHit[] {
+  async recall(query: string, k = 5): Promise<MemoryHit[]> {
     const rows = this.db
       .prepare("SELECT id, name, text, tags, embedding, usage_count FROM memory WHERE project = ?")
       .all(this.project) as Array<{
@@ -157,10 +169,10 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   /** The DB is a projection of the files — re-derive it at any time. */
-  rebuildIndex(files: FileStore): void {
+  async rebuildIndex(files: FileStore): Promise<void> {
     this.db.prepare("DELETE FROM memory WHERE project = ?").run(this.project);
     for (const entry of files.listMemoryEntries()) {
-      this.crystallize({
+      await this.crystallize({
         name: entry.name,
         text: entry.text,
         tags: entry.tags,
@@ -170,22 +182,22 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   /** Index rows (name, usage, recency) — the Library screen's curation view. */
-  listIndexed(): Array<{ name: string; usage_count: number; last_used: string | null; source_tick: number | null }> {
+  async listIndexed(): Promise<IndexedRow[]> {
     return this.db
       .prepare(
         "SELECT name, usage_count, last_used, source_tick FROM memory WHERE project = ? ORDER BY usage_count DESC, name",
       )
-      .all(this.project) as Array<{ name: string; usage_count: number; last_used: string | null; source_tick: number | null }>;
+      .all(this.project) as IndexedRow[];
   }
 
-  count(): number {
+  async count(): Promise<number> {
     const row = this.db.prepare("SELECT COUNT(*) AS n FROM memory WHERE project = ?").get(this.project) as {
       n: number;
     };
     return row.n;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close();
   }
 }

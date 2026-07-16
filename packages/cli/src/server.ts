@@ -4,13 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { ArborTreeSchema, buildZip, treeToMarkdownFiles, validateInvariants } from "@arbor/schema";
-import { FileStore, SqliteMemoryStore } from "@arbor/store";
+import { FileStore, openMemoryStore } from "@arbor/store";
 import {
   EventBus,
   LlmPlanner,
   MODEL_TIERS,
   ScriptedAgent,
   SdkAgent,
+  curate,
   runLoop,
   suggestNodeText,
   type ArborEvent,
@@ -120,14 +121,14 @@ export function createArborServer(projectDir: string): ArborServer {
     };
 
     void (async () => {
-      const memory = new SqliteMemoryStore(files.dbPath, path.basename(projectDir));
+      const memory = await openMemoryStore(files, path.basename(projectDir));
       try {
         const tree = files.readTree();
         await runLoop({ projectDir, tree, files, memory, executor, events, swarm, humanGate });
       } catch (err) {
         broadcast({ type: "run_error", message: err instanceof Error ? err.message : String(err) });
       } finally {
-        memory.close();
+        await memory.close();
         running = false;
         pendingCheckin = null;
         broadcast({ type: "run_state", running: false });
@@ -173,9 +174,9 @@ export function createArborServer(projectDir: string): ArborServer {
         return json(res, 200, files.readTicks());
       }
       if (url.pathname === "/api/memory" && req.method === "GET") {
-        const memory = new SqliteMemoryStore(files.dbPath, path.basename(projectDir));
+        const memory = await openMemoryStore(files, path.basename(projectDir));
         try {
-          const usage = new Map(memory.listIndexed().map((r) => [r.name, r]));
+          const usage = new Map((await memory.listIndexed()).map((r) => [r.name, r]));
           const entries = files.listMemoryEntries().map((e) => ({
             ...e,
             usage_count: usage.get(e.name)?.usage_count ?? 0,
@@ -184,7 +185,23 @@ export function createArborServer(projectDir: string): ArborServer {
           entries.sort((a, b) => b.usage_count - a.usage_count || a.name.localeCompare(b.name));
           return json(res, 200, entries);
         } finally {
-          memory.close();
+          await memory.close();
+        }
+      }
+      if (url.pathname === "/api/skills" && req.method === "GET") {
+        return json(res, 200, files.listSkills());
+      }
+      if (url.pathname === "/api/curate" && req.method === "POST") {
+        const body = (await readBody(req)) as { prune?: boolean; minUsage?: number };
+        const memory = await openMemoryStore(files, path.basename(projectDir));
+        try {
+          const report = await curate(files, memory, {
+            prune: body.prune === true,
+            minUsageForSkill: body.minUsage,
+          });
+          return json(res, 200, report);
+        } finally {
+          await memory.close();
         }
       }
       if (url.pathname === "/api/run" && req.method === "POST") {

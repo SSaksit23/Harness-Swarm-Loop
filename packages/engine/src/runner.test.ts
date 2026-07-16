@@ -62,7 +62,7 @@ describe("runLoop", () => {
     expect(files.readTicks()).toHaveLength(2);
     expect(files.readTicks()[1].loop_decision).toBe("stop_pass");
     expect(files.listMemoryEntries()).toHaveLength(2);
-    expect(memory.count()).toBe(2);
+    expect(await memory.count()).toBe(2);
   });
 
   it("hard stop: halts at max_iterations when the agent never succeeds", async () => {
@@ -109,7 +109,7 @@ describe("runLoop", () => {
   });
 
   it("feeds recalled memory into later runs", async () => {
-    memory.crystallize({ name: "prior-lesson", text: "the check needs ok.txt to exist in the repo root" });
+    await memory.crystallize({ name: "prior-lesson", text: "the check needs ok.txt to exist in the repo root" });
     let sawLesson = false;
     const executor = new ScriptedAgent([
       (cwd) => {

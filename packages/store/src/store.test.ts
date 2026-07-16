@@ -63,35 +63,54 @@ describe("FileStore", () => {
 });
 
 describe("SqliteMemoryStore", () => {
-  it("crystallizes and recalls the most relevant entry", () => {
-    mem.crystallize({ name: "auth-clock", text: "auth token refresh depends on the fixture clock being pinned" });
-    mem.crystallize({ name: "css-grid", text: "the dashboard layout uses css grid with a 12 column track" });
-    mem.crystallize({ name: "sqlite-wal", text: "sqlite works best in WAL mode for concurrent readers" });
+  it("crystallizes and recalls the most relevant entry", async () => {
+    await mem.crystallize({ name: "auth-clock", text: "auth token refresh depends on the fixture clock being pinned" });
+    await mem.crystallize({ name: "css-grid", text: "the dashboard layout uses css grid with a 12 column track" });
+    await mem.crystallize({ name: "sqlite-wal", text: "sqlite works best in WAL mode for concurrent readers" });
 
-    const hits = mem.recall("why does the auth token refresh test fail", 2);
+    const hits = await mem.recall("why does the auth token refresh test fail", 2);
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].name).toBe("auth-clock");
   });
 
-  it("bumps usage_count on recall (curation signal)", () => {
-    mem.crystallize({ name: "auth-clock", text: "auth token refresh depends on the fixture clock" });
-    mem.recall("auth token refresh");
-    const hits = mem.recall("auth token refresh");
+  it("bumps usage_count on recall (curation signal)", async () => {
+    await mem.crystallize({ name: "auth-clock", text: "auth token refresh depends on the fixture clock" });
+    await mem.recall("auth token refresh");
+    const hits = await mem.recall("auth token refresh");
     expect(hits[0].usage_count).toBe(2);
+    expect((await mem.listIndexed())[0]).toMatchObject({ name: "auth-clock", usage_count: 2 });
   });
 
-  it("upserts by name instead of duplicating", () => {
-    mem.crystallize({ name: "fact", text: "first version" });
-    mem.crystallize({ name: "fact", text: "second version" });
-    expect(mem.count()).toBe(1);
-    expect(mem.recall("version")[0].text).toBe("second version");
+  it("upserts by name instead of duplicating", async () => {
+    await mem.crystallize({ name: "fact", text: "first version" });
+    await mem.crystallize({ name: "fact", text: "second version" });
+    expect(await mem.count()).toBe(1);
+    expect((await mem.recall("version"))[0].text).toBe("second version");
   });
 
-  it("rebuilds the index from files (DB is a projection)", () => {
+  it("rebuilds the index from files (DB is a projection)", async () => {
     store.writeMemoryEntry({ name: "from-file", text: "lesson recorded in a markdown file", tags: [], source_tick: null });
-    mem.crystallize({ name: "stale-db-only", text: "this should disappear on rebuild" });
-    mem.rebuildIndex(store);
-    expect(mem.count()).toBe(1);
-    expect(mem.recall("lesson markdown")[0].name).toBe("from-file");
+    await mem.crystallize({ name: "stale-db-only", text: "this should disappear on rebuild" });
+    await mem.rebuildIndex(store);
+    expect(await mem.count()).toBe(1);
+    expect((await mem.recall("lesson markdown"))[0].name).toBe("from-file");
+  });
+});
+
+describe("FileStore skills", () => {
+  it("writes, lists, and detects skills like memory entries", () => {
+    store.writeSkill({ name: "Fix Flaky Tests!", text: "pin the clock in fixtures", tags: ["promoted"], source_tick: 2 });
+    const skills = store.listSkills();
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe("fix-flaky-tests-");
+    expect(store.hasSkill("Fix Flaky Tests!")).toBe(true);
+    expect(store.hasSkill("nope")).toBe(false);
+  });
+
+  it("deletes memory entries by name", () => {
+    const entry = store.writeMemoryEntry({ name: "gone-soon", text: "x", tags: [], source_tick: null });
+    expect(store.deleteMemoryEntry(entry.name)).toBe(true);
+    expect(store.listMemoryEntries()).toHaveLength(0);
+    expect(store.deleteMemoryEntry(entry.name)).toBe(false);
   });
 });
