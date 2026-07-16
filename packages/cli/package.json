@@ -1,0 +1,14 @@
+{
+  "name": "@arbor/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@arbor/engine": "*",
+    "@arbor/schema": "*",
+    "@arbor/store": "*",
+    "commander": "^12.1.0",
+    "picocolors": "^1.1.0"
+  }
+}

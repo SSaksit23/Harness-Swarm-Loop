@@ -1,0 +1,23 @@
+{
+  "name": "arbor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tree-based Harness-Swarm-Loop workbench for controlled autonomous dev systems",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "arbor": "tsx packages/cli/src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  }
+}

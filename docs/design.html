@@ -1,0 +1,1258 @@
+<title>ARBOR — Tree-Based Harness–Swarm–Loop Workbench</title>
+<style>
+  :root {
+    --paper: #F3F5F4;
+    --ink: #1C2327;
+    --ink-soft: #4A555B;
+    --ink-faint: #7C888E;
+    --line: #D4DAD8;
+    --panel: #FFFFFF;
+    --panel-2: #E9EDEC;
+    --harness: #2E7D6B;
+    --harness-soft: #E1EEEA;
+    --swarm: #C8862B;
+    --swarm-soft: #F5EBDA;
+    --loop: #5B6ACF;
+    --loop-soft: #E6E9F8;
+    --stop: #C0483D;
+    --stop-soft: #F4E2E0;
+    --root-node: #1C2327;
+    --root-soft: #E2E6E5;
+    --mono: ui-monospace, "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #11181A;
+      --ink: #E4EAE8;
+      --ink-soft: #A7B4B0;
+      --ink-faint: #6E7C78;
+      --line: #2A3438;
+      --panel: #182022;
+      --panel-2: #1E282B;
+      --harness: #4FA890;
+      --harness-soft: #16352E;
+      --swarm: #DBA04E;
+      --swarm-soft: #3A2C14;
+      --loop: #8B97E8;
+      --loop-soft: #232A4E;
+      --stop: #E06B5F;
+      --stop-soft: #45211D;
+      --root-node: #E4EAE8;
+      --root-soft: #242E31;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #11181A;
+    --ink: #E4EAE8;
+    --ink-soft: #A7B4B0;
+    --ink-faint: #6E7C78;
+    --line: #2A3438;
+    --panel: #182022;
+    --panel-2: #1E282B;
+    --harness: #4FA890;
+    --harness-soft: #16352E;
+    --swarm: #DBA04E;
+    --swarm-soft: #3A2C14;
+    --loop: #8B97E8;
+    --loop-soft: #232A4E;
+    --stop: #E06B5F;
+    --stop-soft: #45211D;
+    --root-node: #E4EAE8;
+    --root-soft: #242E31;
+  }
+  :root[data-theme="light"] {
+    --paper: #F3F5F4;
+    --ink: #1C2327;
+    --ink-soft: #4A555B;
+    --ink-faint: #7C888E;
+    --line: #D4DAD8;
+    --panel: #FFFFFF;
+    --panel-2: #E9EDEC;
+    --harness: #2E7D6B;
+    --harness-soft: #E1EEEA;
+    --swarm: #C8862B;
+    --swarm-soft: #F5EBDA;
+    --loop: #5B6ACF;
+    --loop-soft: #E6E9F8;
+    --stop: #C0483D;
+    --stop-soft: #F4E2E0;
+    --root-node: #1C2327;
+    --root-soft: #E2E6E5;
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px 96px; }
+
+  /* ---------- header ---------- */
+  header { padding: 56px 0 40px; border-bottom: 1px solid var(--line); }
+  .sysline {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-faint);
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+  }
+  .sysline b { color: var(--ink-soft); font-weight: 600; }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px); line-height: 1.08; font-weight: 750;
+    letter-spacing: -0.02em; margin: 18px 0 12px; text-wrap: balance;
+  }
+  h1 .tick { color: var(--harness); }
+  .lede { max-width: 62ch; color: var(--ink-soft); font-size: 17px; margin: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+  .chip {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
+    padding: 4px 12px 4px 9px; border: 1px solid var(--line); border-radius: 3px;
+    display: inline-flex; align-items: center; gap: 8px; background: var(--panel);
+  }
+  .chip i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+  /* ---------- sections ---------- */
+  section { padding-top: 52px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--ink-faint);
+    display: flex; align-items: center; gap: 14px; margin-bottom: 10px;
+  }
+  .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  h2 { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 10px; text-wrap: balance; }
+  h3 { font-size: 17px; font-weight: 650; margin: 0 0 6px; }
+  section > p, .prose p { max-width: 66ch; color: var(--ink-soft); }
+  .prose strong { color: var(--ink); }
+
+  /* ---------- tree canvas + inspector ---------- */
+  .studio {
+    display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(280px, 1fr);
+    gap: 16px; margin-top: 20px; align-items: start;
+  }
+  @media (max-width: 860px) { .studio { grid-template-columns: 1fr; } }
+  .canvas {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; overflow-x: auto;
+  }
+  .canvas svg {
+    display: block; min-width: 640px; width: 100%; height: auto;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .canvas-hint {
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+    padding: 2px 8px 6px; letter-spacing: .04em;
+  }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 4px 8px 10px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+  }
+  .toolbar input[type="text"], .toolbar select {
+    font-family: var(--mono); font-size: 12px; color: var(--ink);
+    background: var(--paper); border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 9px;
+  }
+  .toolbar input[type="text"] { width: 148px; }
+  .toolbar button {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 11px; cursor: pointer;
+  }
+  .toolbar button:hover { border-color: var(--ink-soft); }
+  .toolbar button.warn:hover { border-color: var(--stop); color: var(--stop); }
+
+  svg .edge { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  svg .edge-gate { stroke: var(--stop); stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }
+  svg .edge-mem { stroke: var(--harness); stroke-width: 1.5; stroke-dasharray: 2 4; fill: none; }
+  svg path.sel { stroke: var(--ink); stroke-width: 2.5; }
+  svg .edge-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: stroke; cursor: pointer; }
+  svg .temp { stroke: var(--ink-soft); stroke-width: 1.5; stroke-dasharray: 4 4; fill: none; pointer-events: none; }
+  svg .edgelabel { font-family: var(--mono); font-size: 9.5px; fill: var(--ink-faint); letter-spacing: .04em; pointer-events: none; }
+  svg .node { cursor: grab; }
+  svg .node text { pointer-events: none; }
+  svg .node rect.body { fill: var(--panel); stroke: var(--line); stroke-width: 1.25; }
+  svg .node text.nlabel { font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--ink); }
+  svg .node text.nsub { font-family: var(--mono); font-size: 9px; fill: var(--ink-faint); letter-spacing: .08em; }
+  svg .node:hover rect.body { stroke: var(--ink-soft); }
+  svg .node:focus { outline: none; }
+  svg .node:focus rect.body, svg .node.active rect.body { stroke-width: 2; }
+  svg .node.active rect.body { stroke: var(--ink); }
+  svg .node[data-layer="harness"].active rect.body, svg .node[data-layer="harness"]:focus rect.body { stroke: var(--harness); }
+  svg .node[data-layer="swarm"].active rect.body,   svg .node[data-layer="swarm"]:focus rect.body   { stroke: var(--swarm); }
+  svg .node[data-layer="loop"].active rect.body,    svg .node[data-layer="loop"]:focus rect.body    { stroke: var(--loop); }
+  svg .port { fill: var(--panel); stroke: var(--ink-faint); stroke-width: 1.5; cursor: crosshair; }
+  svg .node:hover .port, svg .port:hover { stroke: var(--ink); }
+  svg .node.droptarget rect.body { stroke: var(--harness); stroke-width: 2; }
+
+  .inspector {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 18px; position: sticky; top: 16px;
+  }
+  .inspector .tag {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    display: inline-block; padding: 2px 8px; border-radius: 3px; margin-bottom: 10px;
+    color: var(--paper);
+  }
+  .inspector h3 { font-size: 18px; }
+  .inspector .role { font-size: 14px; color: var(--ink-soft); margin: 4px 0 14px; }
+  .inspector .k {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 14px 0 5px;
+  }
+  .inspector ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--ink-soft); }
+  .inspector li { margin: 3px 0; }
+  .inspector pre {
+    margin: 6px 0 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+    padding: 10px 12px; overflow-x: auto;
+  }
+  .inspector code, pre code { font-family: var(--mono); font-size: 11.5px; line-height: 1.55; color: var(--ink); }
+  .inspector input.edit, .inspector textarea.edit {
+    width: 100%; font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+    padding: 7px 9px;
+  }
+  .inspector textarea.edit { min-height: 72px; resize: vertical; font-family: var(--sans); font-size: 13.5px; }
+  .inspector .hintline { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 12px; }
+
+  /* ---------- input label spec ---------- */
+  .labels { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 22px; }
+  .label-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px; border-top: 3px solid var(--ink); }
+  .label-card.h { border-top-color: var(--harness); }
+  .label-card.s { border-top-color: var(--swarm); }
+  .label-card.l { border-top-color: var(--loop); }
+  .label-card .field { font-family: var(--mono); font-size: 13px; font-weight: 700; }
+  .label-card .req { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--stop); text-transform: uppercase; margin-left: 8px; }
+  .label-card .opt { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--ink-faint); text-transform: uppercase; margin-left: 8px; }
+  .label-card p { font-size: 13.5px; color: var(--ink-soft); margin: 8px 0 0; }
+  .label-card .feeds { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 12px; letter-spacing: .03em; }
+
+  /* ---------- run cycle ---------- */
+  .cycle { display: grid; gap: 0; margin-top: 22px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .tick-row {
+    display: grid; grid-template-columns: 52px 150px 1fr; gap: 16px; align-items: baseline;
+    padding: 14px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .tick-row:last-child { border-bottom: none; }
+  .tick-row .n { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink-faint); }
+  .tick-row .owner { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+  .tick-row .owner.h { color: var(--harness); } .tick-row .owner.s { color: var(--swarm); }
+  .tick-row .owner.l { color: var(--loop); } .tick-row .owner.x { color: var(--stop); }
+  .tick-row .what { font-size: 14.5px; color: var(--ink-soft); max-width: 62ch; }
+  .tick-row .what b { color: var(--ink); font-weight: 650; }
+  @media (max-width: 640px) { .tick-row { grid-template-columns: 40px 1fr; } .tick-row .what { grid-column: 1 / -1; } }
+
+  /* ---------- schema / code blocks ---------- */
+  .twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-top: 22px; }
+  .schema { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .schema .bar {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; padding: 8px 14px;
+    border-bottom: 1px solid var(--line); color: var(--ink-soft); background: var(--panel-2);
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  .schema pre { margin: 0; padding: 14px 16px; overflow-x: auto; }
+
+  /* ---------- screens table ---------- */
+  .screens { margin-top: 22px; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 14px; }
+  th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    text-align: left; color: var(--ink-faint); font-weight: 600;
+    padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2);
+  }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-soft); }
+  tr:last-child td { border-bottom: none; }
+  td.name { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  td .mini { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+
+  /* ---------- invariants ---------- */
+  .invariants { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 22px; }
+  .inv { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
+  .inv .no {
+    font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .12em;
+    color: var(--stop); text-transform: uppercase;
+  }
+  .inv h3 { margin-top: 6px; }
+  .inv p { font-size: 13.5px; color: var(--ink-soft); margin: 6px 0 0; }
+  .inv .drop { font-family: var(--mono); font-size: 11.5px; color: var(--stop); margin-top: 12px; }
+
+  /* ---------- label compiler ---------- */
+  .compiler { margin-top: 26px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px; }
+  .compiler p { font-size: 14px; color: var(--ink-soft); max-width: 66ch; margin: 6px 0 0; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0 14px; }
+  .flow .step { font-family: var(--mono); font-size: 11.5px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--ink); }
+  .flow .step.gate { border-color: var(--stop); color: var(--stop); }
+  .flow .arr { font-family: var(--mono); color: var(--ink-faint); font-size: 12px; }
+  .compiler pre { margin: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; overflow-x: auto; }
+
+  /* ---------- memory store tiers ---------- */
+  .tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-top: 22px; }
+  .tier { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
+  .tier .tno { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
+  .tier h3 { margin-top: 4px; }
+  .tier .rec { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--harness); border: 1px solid var(--harness); border-radius: 3px; padding: 1px 7px; margin-left: 8px; vertical-align: 2px; white-space: nowrap; }
+  .tier p { font-size: 13.5px; color: var(--ink-soft); margin: 8px 0 0; }
+  .tier .fit { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 12px; }
+
+  /* ---------- run telemetry ---------- */
+  .telemetry { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
+  .tel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .k2 { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 8px; }
+  .btn-sim { font-family: var(--mono); font-size: 12px; color: var(--paper); background: var(--harness); border: 1px solid var(--harness); border-radius: 4px; padding: 7px 14px; cursor: pointer; }
+  .btn-sim:disabled { opacity: .55; cursor: default; }
+  .tel-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .tel-grid { grid-template-columns: 1fr; } }
+  .tel-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; }
+  .tel-card + .tel-card { margin-top: 12px; }
+  .agent-row { display: grid; grid-template-columns: 104px 68px 1fr 60px; gap: 10px; align-items: center; padding: 7px 2px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .agent-row:last-child { border-bottom: none; }
+  .agent-row.head { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+  .aname { font-family: var(--mono); font-size: 12px; font-weight: 700; }
+  .aname.s { color: var(--swarm); } .aname.x { color: var(--stop); } .aname.h { color: var(--harness); }
+  .atask { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-row .r { text-align: right; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+  .pill { font-family: var(--mono); font-size: 10px; letter-spacing: .06em; padding: 2px 0; border-radius: 999px; text-align: center; border: 1px solid var(--line); color: var(--ink-faint); }
+  .pill.st-run  { background: var(--swarm-soft); border-color: var(--swarm); color: var(--swarm); }
+  .pill.st-pass { background: var(--harness-soft); border-color: var(--harness); color: var(--harness); }
+  .pill.st-fail { background: var(--stop-soft); border-color: var(--stop); color: var(--stop); }
+  .stages { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stg { font-family: var(--mono); font-size: 10.5px; padding: 3px 8px; border-radius: 3px; border: 1px solid var(--line); color: var(--ink-faint); }
+  .stg.on { background: var(--loop-soft); border-color: var(--loop); color: var(--loop); font-weight: 700; }
+  .procline { font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); margin-top: 10px; }
+  .gauge { height: 8px; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .gauge i { display: block; height: 100%; width: 0%; background: var(--harness); }
+  @media (prefers-reduced-motion: no-preference) { .gauge i { transition: width .5s ease; } }
+  .thoughts { margin-top: 14px; }
+  .tstream { max-height: 190px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); padding: 10px 12px; }
+  .thought { font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--ink-soft); }
+  .thought b { font-weight: 700; }
+  .thought b.h { color: var(--harness); } .thought b.s { color: var(--swarm); }
+  .thought b.x { color: var(--stop); } .thought b.l { color: var(--loop); }
+  .telnote { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 10px; }
+
+  footer {
+    margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12px; color: var(--ink-faint); letter-spacing: .05em;
+    display: flex; flex-wrap: wrap; gap: 8px 24px;
+  }
+
+  a { color: var(--loop); }
+  :focus-visible { outline: 2px solid var(--loop); outline-offset: 2px; }
+  @media (prefers-reduced-motion: no-preference) {
+    svg .node rect.body { transition: stroke .12s ease; }
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="sysline">
+    <span><b>ARBOR</b> · application design</span>
+    <span>graph-based agent loop harness workbench</span>
+    <span>spec v0.3 · editable canvas + memory store + telemetry</span>
+  </div>
+  <h1>One root. Three branches. Every run gated by something that can say <span class="tick">no</span>.</h1>
+  <p class="lede">ARBOR is a tree-based workbench for engineering controlled autonomous dev systems. The user plants a <strong>Mission Root</strong> — goals, context, and metric scope entered as input labels — and the tree wires that root through the three HSL layers: the Harness (what the agent knows and must obey), the Swarm (who does the work), and the Loop (when it runs and when it stops).</p>
+  <div class="legend">
+    <span class="chip"><i style="background:var(--root-node)"></i>root</span>
+    <span class="chip"><i style="background:var(--harness)"></i>harness — the standard</span>
+    <span class="chip"><i style="background:var(--swarm)"></i>swarm — the workers</span>
+    <span class="chip"><i style="background:var(--loop)"></i>loop — the clock &amp; the stop</span>
+    <span class="chip"><i style="background:var(--stop)"></i>gate / halt</span>
+  </div>
+</header>
+
+<!-- ================= SYSTEM TREE ================= -->
+<section>
+  <div class="eyebrow">01 · system tree — live editor</div>
+  <h2>The tree is the application</h2>
+  <p>Everything in ARBOR is a node on one tree, and this canvas is a working editor, not a picture. Select a node to inspect its role and contract — or build your own: add nodes and sub-nodes from the toolbar, drag any node to reposition it, and drag the small ○ port on a node's right edge onto another node to wire a new connection. Click an edge to select it; Delete removes a selected node or edge. Your layout is saved in this browser; Reset restores the canonical HSL tree.</p>
+
+  <div class="studio">
+    <div class="canvas">
+      <div class="toolbar">
+        <input type="text" id="nodeName" placeholder="new node label" maxlength="22" aria-label="new node label">
+        <select id="nodeLayer" aria-label="layer for new node">
+          <option value="auto">layer: auto</option>
+          <option value="harness">harness</option>
+          <option value="swarm">swarm</option>
+          <option value="loop">loop</option>
+        </select>
+        <button id="addNode">+ node</button>
+        <button id="addSub">+ sub-node</button>
+        <button id="delSel" class="warn">delete selected</button>
+        <button id="resetTree" class="warn">reset</button>
+      </div>
+      <div class="canvas-hint">click = inspect · drag node = move · drag ○ port → node = connect · sub-node attaches under the selected node</div>
+      <svg viewBox="0 0 700 560" role="group" aria-label="ARBOR system tree editor: mission root connecting harness, swarm, and loop branches" id="tree">
+        <g id="edges"></g>
+        <g id="temp"></g>
+        <g id="nodes"></g>
+      </svg>
+    </div>
+
+    <aside class="inspector" id="inspector" aria-live="polite">
+      <!-- filled by script -->
+    </aside>
+  </div>
+</section>
+
+<!-- ================= INPUT LABELS ================= -->
+<section>
+  <div class="eyebrow">02 · input labels</div>
+  <h2>What the user plants at the root</h2>
+  <p>A run begins with one form — filled by hand, or drafted automatically by the label compiler below from a single plain-language description. Either way, each field is a labeled input on the Mission Root, and each label feeds a specific branch — nothing is decoration; every label becomes a constraint somewhere in the tree.</p>
+  <div class="labels">
+    <div class="label-card h">
+      <span class="field">goal</span><span class="req">required</span>
+      <p>What "done" means, stated as an outcome the verifier can check — not a vibe. One sentence of intent plus explicit success criteria.</p>
+      <div class="feeds">→ harness/brief · success_criteria[]</div>
+    </div>
+    <div class="label-card h">
+      <span class="field">context</span><span class="req">required</span>
+      <p>Repo paths, architecture notes, rules, and out-of-scope declarations. Merged with recalled memory at session start to form the brief.</p>
+      <div class="feeds">→ harness/brief · harness/memory</div>
+    </div>
+    <div class="label-card s">
+      <span class="field">metric_scope</span><span class="req">required</span>
+      <p>The measurable envelope: which metrics count (tests passing, lint clean, eval score ≥ threshold) and over what surface (files, packages, endpoints).</p>
+      <div class="feeds">→ swarm/verifier · rubric + scope</div>
+    </div>
+    <div class="label-card l">
+      <span class="field">budget</span><span class="opt">default: capped</span>
+      <p>Max iterations, cost ceiling in tokens or dollars, and the no-progress window. Omitted values fall back to conservative defaults — never to unlimited.</p>
+      <div class="feeds">→ loop/contract · loop/hard_stops</div>
+    </div>
+    <div class="label-card l">
+      <span class="field">trigger</span><span class="opt">default: manual</span>
+      <p>What starts a tick: manual run, schedule (cron), or event (CI failure, new backlog item). Scope of each tick is bounded by the contract.</p>
+      <div class="feeds">→ loop/contract · trigger + scope</div>
+    </div>
+    <div class="label-card s">
+      <span class="field">width_hint</span><span class="opt">default: auto</span>
+      <p>Feeds the ceiling test: is this task genuinely wide (parallel workers pay off) or sequential (one agent, no swarm)? Auto runs the test; the user can override.</p>
+      <div class="feeds">→ swarm/orchestrator · topology decision</div>
+    </div>
+  </div>
+
+  <div class="compiler">
+    <h3>Auto-generated labels — the label compiler</h3>
+    <p>Nobody has to fill six fields. The user can describe the mission in one plain-language box, and the <strong>label compiler</strong> — a single premium-model pass — drafts every label from it, quoting the span of the user's text each value came from. Labels below the confidence threshold are flagged, and the run stays blocked until the user confirms or edits them: the LLM drafts, the human ratifies, and invariant 1 still holds because an unconfirmed goal never compiles to success criteria.</p>
+    <div class="flow">
+      <span class="step">freeform input</span><span class="arr">→</span>
+      <span class="step">LLM extracts labels + confidence + source span</span><span class="arr">→</span>
+      <span class="step gate">confidence &lt; 0.8 → flag</span><span class="arr">→</span>
+      <span class="step">user confirms / edits</span><span class="arr">→</span>
+      <span class="step">labels planted on root</span>
+    </div>
+    <pre><code>// input: "keep my auth tests green overnight, don't touch payments, stop at $10"
+{
+  "goal":         { "value": "auth test suite green",
+                    "confidence": 0.96, "source": "keep my auth tests green" },
+  "metric_scope": { "value": { "metric": "pytest tests/auth -q", "threshold": "0 failures" },
+                    "confidence": 0.88 },
+  "context":      { "value": ["src/auth/"], "confidence": 0.71, "needs_confirm": true },
+  "budget":       { "value": { "cost_ceiling_usd": 10 }, "confidence": 0.97, "source": "stop at $10" },
+  "trigger":      { "value": "cron: nightly", "confidence": 0.92, "source": "overnight" },
+  "out_of_scope": { "value": ["payments/"], "confidence": 0.95, "source": "don't touch payments" }
+}</code></pre>
+  </div>
+</section>
+
+<!-- ================= DATA MODEL ================= -->
+<section>
+  <div class="eyebrow">03 · data model</div>
+  <h2>Everything is a node; every handoff is a contract</h2>
+  <p>The tree persists as plain JSON on disk inside the project (versionable, diffable, no database). Two schemas carry the whole system: the <strong>Node</strong>, and the <strong>Edge contract</strong> that types every handoff between nodes — orchestrator to worker, worker to verifier, verifier to loop. The canvas above edits exactly these records.</p>
+  <div class="twocol">
+    <div class="schema">
+      <div class="bar"><span>node.schema.json</span><span>tree vertex</span></div>
+      <pre><code>{
+  "id": "swarm.verifier",
+  "layer": "harness | swarm | loop | root",
+  "type": "brief | memory | skill | orchestrator
+         | worker | verifier | contract
+         | hard_stops | sandbox | mission | custom",
+  "label": "Verifier",
+  "parent": "swarm",
+  "inputs": { "from_labels": ["metric_scope"] },
+  "config": { },            // type-specific, see inspector
+  "state": {
+    "status": "idle | running | pass | fail | halted",
+    "last_tick": 12,
+    "spend": { "tokens": 48210, "usd": 1.94 }
+  }
+}</code></pre>
+    </div>
+    <div class="schema">
+      <div class="bar"><span>edge.contract.json</span><span>typed handoff</span></div>
+      <pre><code>{
+  "from": "swarm.worker.2",
+  "to":   "swarm.verifier",
+  "payload_schema": {
+    "task_id":   "string",
+    "diff":      "string (unified patch)",
+    "claims":    "string[]  // what worker says it did",
+    "artifacts": "path[]"
+  },
+  "on_schema_violation": "reject_and_requeue",
+  "max_payload_kb": 256
+}</code></pre>
+    </div>
+    <div class="schema">
+      <div class="bar"><span>loop.contract.json</span><span>the safety envelope</span></div>
+      <pre><code>{
+  "trigger": "manual | cron | event",
+  "scope":   "one backlog item per tick",
+  "action":  "plan -> execute -> verify",
+  "budget":  { "max_iterations": 8,
+               "cost_ceiling_usd": 10.00,
+               "no_progress_window": 2 },
+  "stop":    "verifier pass OR any hard stop",
+  "report":  "tick summary -> run console + memory"
+}</code></pre>
+    </div>
+    <div class="schema">
+      <div class="bar"><span>tick.record.json</span><span>observability unit</span></div>
+      <pre><code>{
+  "tick": 12,
+  "plan": ["task ids issued by orchestrator"],
+  "results": [{ "task_id": "...", "verdict": "pass" }],
+  "verifier": { "verdict": "fail",
+                "reasons": ["test_auth_refresh red"] },
+  "loop_decision": "continue",
+  "spend_delta": { "tokens": 3911, "usd": 0.21 },
+  "crystallized": ["memory/auth-refresh-gotcha.md"]
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MEMORY STORE ================= -->
+<section>
+  <div class="eyebrow">04 · project memory store</div>
+  <h2>Every project remembered, every memory queryable</h2>
+  <p>Files stay the source of truth for a single project — diffable, git-versionable, reviewable. The database sits behind them as the <strong>memory store</strong>: it indexes every project's tree, ticks, and crystallized memory so recall works across projects ("have we solved this before, anywhere?") and survives repo deletion. The store is a projection of the files — rebuildable at any time, so losing it never loses work.</p>
+  <div class="tiers">
+    <div class="tier">
+      <span class="tno">tier 1 · embedded</span>
+      <h3>SQLite + sqlite-vec<span class="rec">recommended default</span></h3>
+      <p>One file (<code>arbor/index.db</code>), zero setup, transactional. FTS5 handles keyword recall; sqlite-vec handles semantic recall over memory embeddings. Right up until you need multiple users or machines.</p>
+      <div class="fit">fits: solo dev · one machine · CI-friendly</div>
+    </div>
+    <div class="tier">
+      <span class="tno">tier 2 · document db</span>
+      <h3>MongoDB Atlas</h3>
+      <p>The node / tick / memory records are already documents, so they map 1:1 into collections — no translation layer. Atlas Vector Search covers semantic memory recall, and one cluster serves every project and teammate.</p>
+      <div class="fit">fits: team · many projects · hosted dashboards</div>
+    </div>
+    <div class="tier">
+      <span class="tno">tier 3 · relational</span>
+      <h3>Postgres + pgvector</h3>
+      <p>Choose it when the memory store must join with existing company data or Postgres is already running. JSONB columns keep the document shape; pgvector covers recall.</p>
+      <div class="fit">fits: existing pg infra · compliance needs</div>
+    </div>
+  </div>
+  <div class="twocol">
+    <div class="schema">
+      <div class="bar"><span>collections / tables</span><span>memory store layout</span></div>
+      <pre><code>projects  { _id, name, repo, labels, created_at,
+            tree_ref: "arbor/tree/" }
+ticks     { project_id, tick, record  /* tick.record.json */ }
+memory    { project_id | null,   // null = global memory
+            text, embedding[], tags[],
+            source_tick, usage_count, last_used }
+skills    { name, body, usage_count, promoted_from }</code></pre>
+    </div>
+    <div class="schema">
+      <div class="bar"><span>recall query</span><span>runs at T1 of every tick</span></div>
+      <pre><code>// hybrid recall: vector + keyword, project-scoped then global
+recall(goal_embedding, k = 5) =
+  top_k( memory
+         where project_id in [this_project, null]
+         rank by 0.7 * cosine(embedding, goal_embedding)
+               + 0.3 * fts_score(text, goal_terms) )
+
+// every hit bumps usage_count -> curation signal</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= RUN CYCLE ================= -->
+<section>
+  <div class="eyebrow">05 · run cycle</div>
+  <h2>What one tick does</h2>
+  <p>Each loop tick walks the tree root-to-leaves and back. The column of color shows which layer owns each stage — the same three hues as the tree, with red reserved for the moments the system can refuse.</p>
+  <div class="cycle">
+    <div class="tick-row"><span class="n">T1</span><span class="owner h">harness</span><span class="what"><b>Load context.</b> Read the brief, recall memory, mount relevant skills. The success criteria loaded here are the standard everything downstream is judged against.</span></div>
+    <div class="tick-row"><span class="n">T2</span><span class="owner s">swarm</span><span class="what"><b>Plan &amp; split.</b> The orchestrator (premium model) runs the ceiling test, then decomposes the tick's scope into typed tasks. Small or sequential work skips the swarm entirely.</span></div>
+    <div class="tick-row"><span class="n">T3</span><span class="owner s">swarm</span><span class="what"><b>Execute in parallel.</b> Specialist workers (cheaper models) each take one task inside the sandbox and return the typed payload — diff, claims, artifacts.</span></div>
+    <div class="tick-row"><span class="n">T4</span><span class="owner x">gate</span><span class="what"><b>Verify.</b> The verifier checks every payload against the harness's success criteria and the metric scope. It can reject: failed items are requeued or the tick fails. Claims are never trusted — only checks.</span></div>
+    <div class="tick-row"><span class="n">T5</span><span class="owner l">loop</span><span class="what"><b>Decide.</b> Continue if the verifier failed and budget remains; stop on verifier pass, max iterations, no-progress window, or cost ceiling — whichever fires first.</span></div>
+    <div class="tick-row"><span class="n">T6</span><span class="owner h">harness</span><span class="what"><b>Crystallize.</b> Write the tick record, distill what was learned into memory, and promote repeated work into skills. The next tick starts smarter than this one.</span></div>
+  </div>
+</section>
+
+<!-- ================= TELEMETRY ================= -->
+<section>
+  <div class="eyebrow">06 · run telemetry</div>
+  <h2>Watching the swarm think, spend, and stop</h2>
+  <p>Every agent streams three signals to the workbench — status, a model-authored thought summary, and token spend — and the panel below is the design for how they read at a glance. Press simulate to watch a scripted two-iteration run: workers execute in parallel, the verifier rejects once, the loop continues, then passes and halts well under the ceiling. (This is a design mock; in the real engine these events arrive over the websocket feed.)</p>
+  <div class="telemetry">
+    <div class="tel-head">
+      <span class="k2">live run · tick telemetry</span>
+      <button class="btn-sim" id="simRun">▶ simulate a run</button>
+    </div>
+    <div class="tel-grid">
+      <div class="tel-card">
+        <div class="k2">agents</div>
+        <div class="agent-row head"><span>agent</span><span>status</span><span>current task</span><span class="r">tokens</span></div>
+        <div class="agent-row"><span class="aname s">orchestrator</span><span class="pill" id="st-orch">idle</span><span class="atask" id="task-orch">—</span><span class="r" id="tk-orch">0</span></div>
+        <div class="agent-row"><span class="aname s">worker-1</span><span class="pill" id="st-w1">idle</span><span class="atask" id="task-w1">—</span><span class="r" id="tk-w1">0</span></div>
+        <div class="agent-row"><span class="aname s">worker-2</span><span class="pill" id="st-w2">idle</span><span class="atask" id="task-w2">—</span><span class="r" id="tk-w2">0</span></div>
+        <div class="agent-row"><span class="aname s">worker-3</span><span class="pill" id="st-w3">idle</span><span class="atask" id="task-w3">—</span><span class="r" id="tk-w3">0</span></div>
+        <div class="agent-row"><span class="aname x">verifier</span><span class="pill" id="st-ver">idle</span><span class="atask" id="task-ver">—</span><span class="r" id="tk-ver">0</span></div>
+      </div>
+      <div>
+        <div class="tel-card">
+          <div class="k2">overall process</div>
+          <div class="stages">
+            <span class="stg" data-s="1">T1 load</span><span class="stg" data-s="2">T2 plan</span>
+            <span class="stg" data-s="3">T3 execute</span><span class="stg" data-s="4">T4 verify</span>
+            <span class="stg" data-s="5">T5 decide</span><span class="stg" data-s="6">T6 crystallize</span>
+          </div>
+          <div class="procline">iteration <b id="simIter">–</b> / 8 · <span id="simDecision">not started</span></div>
+        </div>
+        <div class="tel-card">
+          <div class="k2">token &amp; cost budget</div>
+          <div class="gauge"><i id="simGauge"></i></div>
+          <div class="procline"><span id="simSpend">$0.00</span> of $10.00 ceiling · engine hard-stops at 100%</div>
+        </div>
+      </div>
+    </div>
+    <div class="thoughts">
+      <div class="k2">thought stream</div>
+      <div class="tstream" id="simThoughts">
+        <div class="thought"><b class="l">run console</b> waiting — press simulate to replay a recorded tick sequence.</div>
+      </div>
+      <div class="telnote">thought lines are model-authored summaries each agent emits at checkpoints — auditable narration, not raw chain-of-thought.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SCREENS ================= -->
+<section>
+  <div class="eyebrow">07 · screens</div>
+  <h2>Four surfaces, one tree</h2>
+  <p>The UI never invents a second mental model — every screen is a different lens on the same tree and its tick records.</p>
+  <div class="screens">
+    <table>
+      <tr><th>surface</th><th>what it shows</th><th>primary actions</th></tr>
+      <tr>
+        <td class="name">Canvas<div class="mini">default view</div></td>
+        <td>The system tree, live: node status pills (idle / running / pass / fail / halted), spend badges, and the gate edge pulsing on verifier rejections. The editor above is its seed.</td>
+        <td>Create nodes and sub-nodes, drag to rearrange, drag ports to wire edges, edit input labels on the root, open any node in the Inspector.</td>
+      </tr>
+      <tr>
+        <td class="name">Inspector<div class="mini">right panel</div></td>
+        <td>The selected node's config, its edge contracts, and its slice of the current tick record.</td>
+        <td>Edit config with schema validation; dry-run a single node against sample payloads.</td>
+      </tr>
+      <tr>
+        <td class="name">Run console<div class="mini">bottom drawer</div></td>
+        <td>The telemetry panel from §06, live — agent status board, thought stream, token/cost gauge — plus the tick timeline: one row per tick with plan, verdicts, loop decision, and spend delta. Expands to full traces for the 3am question "what did it actually do?"</td>
+        <td>Start / pause / halt a run; replay a tick; export a run report.</td>
+      </tr>
+      <tr>
+        <td class="name">Library<div class="mini">memory &amp; skills</div></td>
+        <td>Crystallized memory entries and the skill library, each linked to the ticks that produced or used them, with usage counts for curation.</td>
+        <td>Edit or retire memory; promote a repeated pattern to a skill; run a curation pass.</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- ================= ARCHITECTURE ================= -->
+<section>
+  <div class="eyebrow">08 · architecture</div>
+  <h2>Three thin layers over the filesystem</h2>
+  <div class="prose">
+    <p><strong>Workbench (frontend).</strong> React + SVG tree canvas (the editor above is the seed of it), inspector forms generated from the node schemas, and a websocket feed of tick events. No state of its own — it renders the tree files and the event stream.</p>
+    <p><strong>Engine (runner).</strong> A Claude Agent SDK process per run: it loads the harness, spawns orchestrator / worker / verifier agents per the swarm config (model-tiered — the premium model only plans and verifies designs; workers run on cheaper models), enforces the loop contract, and emits tick records. Hard stops are enforced by the engine, outside any model's reach — a model cannot talk its way past the cost ceiling.</p>
+    <p><strong>Store (filesystem).</strong> An <code>arbor/</code> directory in the project: <code>tree/*.json</code> for nodes and contracts, <code>ticks/*.json</code> for run history, <code>memory/</code> and <code>skills/</code> for the compounding layer. Everything is git-versionable, so the control system itself has a reviewable history. Behind the files sits the memory store from §04 — SQLite by default, MongoDB Atlas at team scale — indexing every project for cross-project recall.</p>
+    <p><strong>Plugin mapping.</strong> Each branch delegates to the layer plugins already built: harness → <code>agent-md-authoring</code> + <code>compounding-dev-stack</code> + <code>skill-curator</code>; swarm → <code>agent-swarms</code> + <code>orchestrator-delegation</code>; loop → <code>loop-engineering</code> + <code>self-verifying-loop</code>. ARBOR is the wiring diagram; the plugins are the components.</p>
+  </div>
+</section>
+
+<!-- ================= INVARIANTS ================= -->
+<section>
+  <div class="eyebrow">09 · control invariants</div>
+  <h2>Four rules the tree may never violate</h2>
+  <p>The workbench validates these on every save and refuses to start a run that breaks one. This is what keeps the system control rather than chaos. Free wiring on the canvas is allowed while you sketch — the validator runs at save-and-run time, so an experimental edge costs nothing until you ask the engine to execute it.</p>
+  <div class="invariants">
+    <div class="inv">
+      <span class="no">invariant 1</span>
+      <h3>A standard exists</h3>
+      <p>The root's goal label must compile to checkable success criteria in the brief. No run starts against a vibe.</p>
+      <div class="drop">drop it → confident garbage ships</div>
+    </div>
+    <div class="inv">
+      <span class="no">invariant 2</span>
+      <h3>Something can say no</h3>
+      <p>Every path from workers to output passes through a verifier node wired to the standard. Claims are evidence of nothing.</p>
+      <div class="drop">drop it → no one checks the work</div>
+    </div>
+    <div class="inv">
+      <span class="no">invariant 3</span>
+      <h3>Every loop halts</h3>
+      <p>All three hard stops — max iterations, no-progress window, cost ceiling — must be finite, and the engine enforces them outside the model.</p>
+      <div class="drop">drop it → the budget burns at 3am</div>
+    </div>
+    <div class="inv">
+      <span class="no">invariant 4</span>
+      <h3>Every run teaches</h3>
+      <p>A tick is not complete until its record and lessons are crystallized back into memory. Failures instruct instead of repeating.</p>
+      <div class="drop">drop it → every run starts cold</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>ARBOR · HSL workbench spec v0.3</span>
+  <span>harness sets the standard · verifier says no · loop halts · memory compounds</span>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var VB = { w: 700, h: 560 };
+  var H = 44; // node height
+  var STORE_KEY = "arbor-graph-v2";
+
+  var svg = document.getElementById("tree");
+  var edgesG = document.getElementById("edges");
+  var nodesG = document.getElementById("nodes");
+  var tempG = document.getElementById("temp");
+  var inspector = document.getElementById("inspector");
+  var svgNS = "http://www.w3.org/2000/svg";
+  var layerVar = { root: "var(--root-node)", harness: "var(--harness)", swarm: "var(--swarm)", loop: "var(--loop)" };
+
+  var BASE_NODES = [
+    { id: "root", x: 32, y: 280, w: 116, layer: "root", label: "MISSION", sub: "root",
+      title: "Mission Root", tagBg: "var(--root-node)",
+      role: "The single entry point. Holds the user's input labels and fans them out to the three branches — every constraint in the tree traces back to a label here.",
+      inputs: ["goal — checkable outcome", "context — repo, rules, out-of-scope", "metric_scope — what counts, over what surface", "budget / trigger / width_hint — optional, defaulted"],
+      schema: '{\n  "type": "mission",\n  "labels": {\n    "goal": "make auth test suite green",\n    "context": ["src/auth/", "docs/arch.md"],\n    "metric_scope": {\n      "metric": "pytest tests/auth -q",\n      "threshold": "0 failures"\n    },\n    "budget": { "max_iterations": 8,\n                "cost_ceiling_usd": 10 }\n  }\n}' },
+    { id: "harness", x: 240, y: 110, w: 116, layer: "harness", label: "HARNESS", sub: "branch",
+      title: "Harness branch", tagBg: "var(--harness)",
+      role: "What the agent knows and must obey — the persistent control layer. Compiles the root's goal and context into the ground truth that defines what “done” and “correct” mean, and carries context across runs.",
+      inputs: ["root labels: goal, context", "recalled memory from prior runs", "mounted skills"],
+      schema: '{\n  "type": "harness",\n  "children": ["brief", "memory", "skills"],\n  "emits": "brief.json  // the standard\\n           every check runs against"\n}' },
+    { id: "brief", x: 430, y: 42, w: 132, layer: "harness", label: "brief", sub: "CLAUDE.md / AGENTS.md",
+      title: "Brief", tagBg: "var(--harness)",
+      role: "The written standard: goal, architecture, rules, out-of-scope, and the success criteria that define correct. Nothing runs autonomously until this exists.",
+      inputs: ["goal + context labels", "authored via agent-md-authoring"],
+      schema: '{\n  "type": "brief",\n  "sections": ["goal", "architecture",\n    "rules", "out_of_scope"],\n  "success_criteria": [\n    { "id": "sc1",\n      "check": "pytest tests/auth -q",\n      "pass_when": "exit 0" }\n  ]\n}' },
+    { id: "memory", x: 430, y: 110, w: 132, layer: "harness", label: "memory", sub: "read → crystallize",
+      title: "Memory", tagBg: "var(--harness)",
+      role: "Read at session start, written at session end. The dotted teal back-edge on the canvas is this node receiving crystallized lessons from each tick — the compounding half of the system.",
+      inputs: ["prior tick records", "verifier failure reasons (the best teachers)"],
+      schema: '{\n  "type": "memory",\n  "recall": "top-k by relevance to goal",\n  "crystallize": {\n    "when": "end of every tick",\n    "format": "one fact per file",\n    "promote_to_skill_after": 3\n  }\n}' },
+    { id: "skills", x: 430, y: 178, w: 132, layer: "harness", label: "skills", sub: "curated library",
+      title: "Skills", tagBg: "var(--harness)",
+      role: "Repeated work, promoted into reusable procedures. Curated periodically — usage counts from tick records drive keep / fix / merge / archive decisions.",
+      inputs: ["patterns repeated across ≥3 ticks", "curation pass via skill-curator"],
+      schema: '{\n  "type": "skills",\n  "mount": "by relevance to task type",\n  "curation": { "cadence": "weekly",\n    "evidence": "usage from ticks/*.json" }\n}' },
+    { id: "swarm", x: 240, y: 280, w: 116, layer: "swarm", label: "SWARM", sub: "branch",
+      title: "Swarm branch", tagBg: "var(--swarm)",
+      role: "Who does the work — the horizontal layer. Only exists after the ceiling test passes: small or sequential tasks run as a single agent and this branch collapses to one node.",
+      inputs: ["task_graph.json from root", "width_hint label", "model tiers config"],
+      schema: '{\n  "type": "swarm",\n  "ceiling_test": "wide AND parallelizable?",\n  "topology": "orchestrator-workers-verifier",\n  "tiers": { "plan": "premium",\n             "execute": "cheap",\n             "verify": "premium" }\n}' },
+    { id: "orchestrator", x: 430, y: 246, w: 132, layer: "swarm", label: "orchestrator", sub: "premium model · plans",
+      title: "Orchestrator", tagBg: "var(--swarm)",
+      role: "Plans and splits. The only agent that sees the whole tick; kept lean (context engineering) so premium tokens buy thinking, not grunt work. Issues typed tasks to workers.",
+      inputs: ["brief.json", "tick scope from loop contract"],
+      schema: '{\n  "type": "orchestrator",\n  "model": "premium",\n  "emits": [{\n    "task_id": "t-12-3",\n    "spec": "string",\n    "acceptance": "maps to success_criteria",\n    "assigned_to": "worker"\n  }]\n}' },
+    { id: "workers", x: 430, y: 314, w: 132, layer: "swarm", label: "workers × N", sub: "cheap models · execute",
+      title: "Workers", tagBg: "var(--swarm)",
+      role: "Specialist executors running in parallel, each on one typed task, inside the sandbox. They return diffs and claims — and their claims are never trusted, only verified.",
+      inputs: ["one task each from orchestrator", "sandbox handle from loop branch"],
+      schema: '{\n  "type": "worker",\n  "model": "cheap",\n  "isolation": "sandbox",\n  "returns": { "task_id": "...",\n    "diff": "patch", "claims": [],\n    "artifacts": [] }\n}' },
+    { id: "verifier", x: 430, y: 382, w: 132, layer: "swarm", label: "verifier", sub: "the thing that says no",
+      title: "Verifier", tagBg: "var(--stop)",
+      role: "Checks every worker payload against the harness's success criteria and the metric_scope label. Rejection is a first-class output: failed items requeue or fail the tick. This node is why the swarm doesn't ship confident garbage.",
+      inputs: ["success_criteria from brief", "metric_scope rubric from root", "worker payloads"],
+      schema: '{\n  "type": "verifier",\n  "checks": [\n    { "run": "pytest tests/auth -q",\n      "pass_when": "exit 0" },\n    { "rubric": "eval score >= 0.9" }\n  ],\n  "on_fail": "requeue | fail_tick",\n  "emits": "verdict -> loop (gate edge)"\n}' },
+    { id: "loop", x: 240, y: 450, w: 116, layer: "loop", label: "LOOP", sub: "branch",
+      title: "Loop branch", tagBg: "var(--loop)",
+      role: "When it runs and — crucially — when it stops. The time layer: re-prompt, check, halt. Owns the contract, the hard stops, and the sandbox that bounds what a tick can touch.",
+      inputs: ["budget + trigger labels from root", "verdicts from the verifier gate"],
+      schema: '{\n  "type": "loop",\n  "children": ["contract",\n    "hard_stops", "sandbox"],\n  "decision": "continue | stop",\n  "stop_on": "verifier pass OR hard stop"\n}' },
+    { id: "loopcontract", x: 430, y: 450, w: 132, layer: "loop", label: "contract", sub: "trigger·scope·budget·stop",
+      title: "Loop contract", tagBg: "var(--loop)",
+      role: "The written agreement authored before anything runs: what triggers a tick, how much one tick may attempt, what it may spend, when it must stop, and what it reports.",
+      inputs: ["budget label", "trigger label", "authored via loop-engineering"],
+      schema: '{\n  "trigger": "cron: nightly",\n  "scope": "one backlog item / tick",\n  "action": "plan -> execute -> verify",\n  "budget": { "max_iterations": 8,\n    "cost_ceiling_usd": 10,\n    "no_progress_window": 2 },\n  "report": "tick record + summary"\n}' },
+    { id: "stops", x: 430, y: 518, w: 132, layer: "loop", label: "hard stops", sub: "engine-enforced · + sandbox",
+      title: "Hard stops & sandbox", tagBg: "var(--stop)",
+      role: "Three finite caps — max iterations, no-progress detection, cost ceiling — enforced by the engine outside any model's reach, plus the sandbox that isolates side effects. The loop halts even when the verifier keeps failing.",
+      inputs: ["budget label (finite, validated)", "spend telemetry per tick"],
+      schema: '{\n  "type": "hard_stops",\n  "enforced_by": "engine, not model",\n  "caps": { "max_iterations": 8,\n    "no_progress_window": 2,\n    "cost_ceiling_usd": 10 },\n  "sandbox": { "fs": "worktree",\n    "net": "deny by default" }\n}' }
+  ];
+
+  var BASE_EDGES = [
+    { from: "root", to: "harness", label: "brief.json" },
+    { from: "root", to: "swarm", label: "task_graph.json" },
+    { from: "root", to: "loop", label: "contract.json" },
+    { from: "harness", to: "brief" },
+    { from: "harness", to: "memory" },
+    { from: "harness", to: "skills" },
+    { from: "swarm", to: "orchestrator" },
+    { from: "swarm", to: "workers" },
+    { from: "swarm", to: "verifier" },
+    { from: "loop", to: "loopcontract" },
+    { from: "loop", to: "stops" },
+    { from: "verifier", to: "loop", kind: "gate", label: "pass / fail" },
+    { from: "verifier", to: "memory", kind: "mem", label: "crystallize" }
+  ];
+
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function fresh() { return { seq: 0, nodes: BASE_NODES.map(clone), edges: BASE_EDGES.map(clone) }; }
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return null;
+      var g = JSON.parse(raw);
+      if (!g || !g.nodes || !g.edges || !g.nodes.some(function (n) { return n.id === "root"; })) return null;
+      return g;
+    } catch (e) { return null; }
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(graph)); } catch (e) { /* private mode etc. */ }
+  }
+
+  var graph = load() || fresh();
+  var selNodeId = "root";
+  var selEdgeIdx = null;
+  var nodeEls = {};
+
+  function byId(id) {
+    for (var i = 0; i < graph.nodes.length; i++) if (graph.nodes[i].id === id) return graph.nodes[i];
+    return null;
+  }
+  function clampX(x, w) { return Math.max(6, Math.min(VB.w - w - 6, x)); }
+  function clampY(y) { return Math.max(H / 2 + 4, Math.min(VB.h - H / 2 - 4, y)); }
+  function esc(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  /* ---------- edge geometry ---------- */
+  function edgePath(a, b) {
+    var sRight = a.x + a.w, tRight = b.x + b.w;
+    // target clearly to the right
+    if (b.x >= sRight - 10) {
+      return bez(sRight, a.y, b.x, b.y, 1);
+    }
+    // target clearly to the left
+    if (a.x >= tRight - 10) {
+      return bez(a.x, a.y, tRight, b.y, -1);
+    }
+    // overlapping columns: bow out the right side
+    var sx = sRight, tx = tRight;
+    var bow = 60;
+    var d = "M" + sx + " " + a.y + " C " + (sx + bow) + " " + a.y + ", " + (tx + bow) + " " + b.y + ", " + tx + " " + b.y;
+    return { d: d, lx: Math.max(sx, tx) + bow * 0.55, ly: (a.y + b.y) / 2, anchor: "start" };
+  }
+  function bez(sx, sy, tx, ty, dir) {
+    var spread = Math.max(30, Math.min(80, Math.abs(tx - sx) / 2));
+    var d = "M" + sx + " " + sy + " C " + (sx + dir * spread) + " " + sy + ", " + (tx - dir * spread) + " " + ty + ", " + tx + " " + ty;
+    return { d: d, lx: (sx + tx) / 2, ly: (sy + ty) / 2 - 6, anchor: "middle" };
+  }
+
+  /* ---------- rendering ---------- */
+  function renderEdges() {
+    edgesG.innerHTML = "";
+    graph.edges.forEach(function (e, i) {
+      var a = byId(e.from), b = byId(e.to);
+      if (!a || !b) return;
+      var geo = edgePath(a, b);
+      var p = document.createElementNS(svgNS, "path");
+      p.setAttribute("class", (e.kind === "gate" ? "edge-gate" : e.kind === "mem" ? "edge-mem" : "edge") + (selEdgeIdx === i ? " sel" : ""));
+      p.setAttribute("d", geo.d);
+      edgesG.appendChild(p);
+      var hit = document.createElementNS(svgNS, "path");
+      hit.setAttribute("class", "edge-hit");
+      hit.setAttribute("d", geo.d);
+      hit.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        selEdgeIdx = i;
+        renderEdges();
+        renderEdgeInspector(e);
+      });
+      edgesG.appendChild(hit);
+      if (e.label) {
+        var t = document.createElementNS(svgNS, "text");
+        t.setAttribute("class", "edgelabel");
+        t.setAttribute("x", geo.lx); t.setAttribute("y", geo.ly);
+        t.setAttribute("text-anchor", geo.anchor);
+        if (e.kind === "gate") t.setAttribute("fill", "var(--stop)");
+        t.textContent = e.label;
+        edgesG.appendChild(t);
+      }
+    });
+  }
+
+  function renderNodes() {
+    nodesG.innerHTML = "";
+    nodeEls = {};
+    graph.nodes.forEach(function (n) {
+      var g = document.createElementNS(svgNS, "g");
+      g.setAttribute("class", "node" + (n.id === selNodeId ? " active" : ""));
+      g.setAttribute("tabindex", "0");
+      g.setAttribute("role", "button");
+      g.setAttribute("data-layer", n.layer);
+      g.setAttribute("aria-label", n.title || n.label);
+
+      var body = document.createElementNS(svgNS, "rect");
+      body.setAttribute("class", "body");
+      body.setAttribute("rx", 4);
+      g.appendChild(body);
+      var stripe = document.createElementNS(svgNS, "rect");
+      stripe.setAttribute("rx", 1.5);
+      stripe.setAttribute("fill", n.tagBg === "var(--stop)" ? "var(--stop)" : (layerVar[n.layer] || "var(--ink-faint)"));
+      g.appendChild(stripe);
+      var t = document.createElementNS(svgNS, "text");
+      t.setAttribute("class", "nlabel");
+      g.appendChild(t);
+      var s = document.createElementNS(svgNS, "text");
+      s.setAttribute("class", "nsub");
+      g.appendChild(s);
+      var port = document.createElementNS(svgNS, "circle");
+      port.setAttribute("class", "port");
+      port.setAttribute("r", 5.5);
+      g.appendChild(port);
+
+      g._els = { body: body, stripe: stripe, t: t, s: s, port: port };
+      nodeEls[n.id] = g;
+      positionNode(n);
+
+      g.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault();
+        if (ev.target === port) startConnect(n, ev);
+        else startMove(n, ev);
+      });
+      g.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectNode(n.id); }
+      });
+      nodesG.appendChild(g);
+    });
+  }
+
+  function positionNode(n) {
+    var g = nodeEls[n.id];
+    if (!g) return;
+    var e = g._els;
+    e.body.setAttribute("x", n.x); e.body.setAttribute("y", n.y - H / 2);
+    e.body.setAttribute("width", n.w); e.body.setAttribute("height", H);
+    e.stripe.setAttribute("x", n.x + 6); e.stripe.setAttribute("y", n.y - H / 2 + 6);
+    e.stripe.setAttribute("width", 4); e.stripe.setAttribute("height", H - 12);
+    e.t.setAttribute("x", n.x + 17); e.t.setAttribute("y", n.y - 1);
+    e.t.textContent = n.label;
+    e.s.setAttribute("x", n.x + 17); e.s.setAttribute("y", n.y + 13);
+    e.s.textContent = n.sub || "";
+    e.port.setAttribute("cx", n.x + n.w); e.port.setAttribute("cy", n.y);
+  }
+
+  function render() {
+    renderNodes();
+    renderEdges();
+  }
+
+  /* ---------- selection & inspector ---------- */
+  function selectNode(id) {
+    selEdgeIdx = null;
+    if (selNodeId && nodeEls[selNodeId]) nodeEls[selNodeId].classList.remove("active");
+    selNodeId = id;
+    if (nodeEls[id]) nodeEls[id].classList.add("active");
+    renderEdges();
+    renderNodeInspector(byId(id));
+  }
+
+  function renderNodeInspector(n) {
+    if (!n) { inspector.innerHTML = ""; return; }
+    var tag = '<span class="tag" style="background:' + (n.tagBg || layerVar[n.layer] || "var(--ink-faint)") + '">' + esc(n.layer) + " layer</span>";
+    if (n.custom) {
+      inspector.innerHTML = tag +
+        '<div class="k">label</div><input class="edit" id="editLabel" maxlength="22" value="' + esc(n.label) + '">' +
+        '<div class="k">role</div><textarea class="edit" id="editRole">' + esc(n.role || "") + "</textarea>" +
+        '<div class="k">contract</div><pre><code>' + esc(customSchema(n)) + "</code></pre>" +
+        '<div class="hintline">custom node · drag ○ to wire it · delete removes it and its edges</div>';
+      var li = document.getElementById("editLabel");
+      var ri = document.getElementById("editRole");
+      li.addEventListener("input", function () {
+        n.label = li.value; n.title = li.value;
+        positionNode(n); save();
+      });
+      ri.addEventListener("input", function () { n.role = ri.value; save(); });
+    } else {
+      inspector.innerHTML = tag +
+        "<h3>" + esc(n.title) + "</h3>" +
+        '<p class="role">' + n.role + "</p>" +
+        '<div class="k">inputs</div><ul>' +
+        (n.inputs || []).map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") +
+        "</ul>" +
+        '<div class="k">contract</div><pre><code>' + esc(n.schema || "") + "</code></pre>";
+    }
+  }
+
+  function customSchema(n) {
+    var parents = graph.edges.filter(function (e) { return e.to === n.id; }).map(function (e) { return e.from; });
+    return '{\n  "id": "' + n.id + '",\n  "type": "custom",\n  "layer": "' + n.layer + '",\n  "label": "' + n.label + '",\n  "parents": ' + JSON.stringify(parents) + "\n}";
+  }
+
+  function renderEdgeInspector(e) {
+    var a = byId(e.from), b = byId(e.to);
+    inspector.innerHTML =
+      '<span class="tag" style="background:var(--ink-faint)">edge</span>' +
+      "<h3>" + esc(a ? a.label : e.from) + " → " + esc(b ? b.label : e.to) + "</h3>" +
+      '<p class="role">' + (e.kind === "gate" ? "Gate edge — carries the verifier's pass/fail verdict into the loop's continue-or-stop decision." :
+        e.kind === "mem" ? "Crystallize edge — carries tick lessons back into memory so the next run starts smarter." :
+        "Typed handoff. In the engine this edge carries a payload validated against edge.contract.json; schema violations reject and requeue.") + "</p>" +
+      '<div class="k">contract</div><pre><code>' + esc('{\n  "from": "' + e.from + '",\n  "to": "' + e.to + '",\n  "kind": "' + (e.kind || "data") + '",\n  "on_schema_violation": "reject_and_requeue"\n}') + "</code></pre>" +
+      '<div class="hintline">press delete (or the toolbar button) to remove this edge</div>';
+  }
+
+  /* ---------- drag: move & connect ---------- */
+  function svgPoint(ev) {
+    var pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  var drag = null;
+  function startMove(n, ev) {
+    var p = svgPoint(ev);
+    drag = { type: "move", node: n, dx: p.x - n.x, dy: p.y - n.y, moved: false, sx: p.x, sy: p.y };
+  }
+  function startConnect(n, ev) {
+    var p = svgPoint(ev);
+    var line = document.createElementNS(svgNS, "path");
+    line.setAttribute("class", "temp");
+    tempG.appendChild(line);
+    drag = { type: "connect", node: n, line: line, px: n.x + n.w, py: n.y };
+    updateTemp(p);
+  }
+  function updateTemp(p) {
+    drag.line.setAttribute("d", "M" + drag.px + " " + drag.py + " L " + p.x + " " + p.y);
+  }
+  function nodeAt(p, exclude) {
+    for (var i = graph.nodes.length - 1; i >= 0; i--) {
+      var n = graph.nodes[i];
+      if (n.id === exclude) continue;
+      if (p.x >= n.x && p.x <= n.x + n.w && p.y >= n.y - H / 2 && p.y <= n.y + H / 2) return n;
+    }
+    return null;
+  }
+
+  window.addEventListener("pointermove", function (ev) {
+    if (!drag) return;
+    var p = svgPoint(ev);
+    if (drag.type === "move") {
+      if (Math.abs(p.x - drag.sx) + Math.abs(p.y - drag.sy) > 3) drag.moved = true;
+      drag.node.x = clampX(p.x - drag.dx, drag.node.w);
+      drag.node.y = clampY(p.y - drag.dy);
+      positionNode(drag.node);
+      renderEdges();
+    } else if (drag.type === "connect") {
+      updateTemp(p);
+      var over = nodeAt(p, drag.node.id);
+      graph.nodes.forEach(function (n) {
+        if (nodeEls[n.id]) nodeEls[n.id].classList.toggle("droptarget", !!(over && over.id === n.id));
+      });
+    }
+  });
+
+  window.addEventListener("pointerup", function (ev) {
+    if (!drag) return;
+    var p = svgPoint(ev);
+    if (drag.type === "move") {
+      if (!drag.moved) selectNode(drag.node.id);
+      else save();
+    } else if (drag.type === "connect") {
+      tempG.innerHTML = "";
+      graph.nodes.forEach(function (n) { if (nodeEls[n.id]) nodeEls[n.id].classList.remove("droptarget"); });
+      var target = nodeAt(p, drag.node.id);
+      if (target) {
+        var dup = graph.edges.some(function (e) { return e.from === drag.node.id && e.to === target.id; });
+        if (!dup) {
+          graph.edges.push({ from: drag.node.id, to: target.id });
+          save();
+        }
+        renderEdges();
+      }
+    }
+    drag = null;
+  });
+
+  svg.addEventListener("click", function (ev) {
+    if (ev.target === svg) { selEdgeIdx = null; renderEdges(); }
+  });
+
+  /* ---------- toolbar ---------- */
+  var nameInput = document.getElementById("nodeName");
+  var layerSel = document.getElementById("nodeLayer");
+
+  function createNode(parent) {
+    var label = nameInput.value.trim() || "node " + (graph.seq + 1);
+    var layer = layerSel.value;
+    if (layer === "auto") layer = parent ? (parent.layer === "root" ? "harness" : parent.layer) : "harness";
+    graph.seq = (graph.seq || 0) + 1;
+    var w = Math.max(96, Math.min(180, label.length * 7.4 + 36));
+    var x, y;
+    if (parent) {
+      x = clampX(parent.x + parent.w + 56, w);
+      y = clampY(parent.y + 64);
+    } else {
+      var k = graph.nodes.length;
+      x = clampX(48 + (k * 61) % 440, w);
+      y = clampY(48 + (k * 97) % 460);
+    }
+    var n = {
+      id: "u" + graph.seq, x: x, y: y, w: w, layer: layer,
+      label: label, sub: parent ? "sub-node of " + parent.label : "custom node",
+      title: label, tagBg: layerVar[layer], custom: true,
+      role: "Describe this node's role here — what it owns, what it receives, and what it emits."
+    };
+    graph.nodes.push(n);
+    if (parent) graph.edges.push({ from: parent.id, to: n.id });
+    nameInput.value = "";
+    save();
+    render();
+    selectNode(n.id);
+  }
+
+  document.getElementById("addNode").addEventListener("click", function () { createNode(null); });
+  document.getElementById("addSub").addEventListener("click", function () {
+    createNode(byId(selNodeId) || byId("root"));
+  });
+
+  function deleteSelected() {
+    if (selEdgeIdx !== null && graph.edges[selEdgeIdx]) {
+      graph.edges.splice(selEdgeIdx, 1);
+      selEdgeIdx = null;
+      save(); render();
+      renderNodeInspector(byId(selNodeId));
+      return;
+    }
+    if (selNodeId && selNodeId !== "root") {
+      var id = selNodeId;
+      graph.nodes = graph.nodes.filter(function (n) { return n.id !== id; });
+      graph.edges = graph.edges.filter(function (e) { return e.from !== id && e.to !== id; });
+      selNodeId = "root";
+      save(); render();
+      selectNode("root");
+    }
+  }
+  document.getElementById("delSel").addEventListener("click", deleteSelected);
+
+  document.getElementById("resetTree").addEventListener("click", function () {
+    graph = fresh();
+    selNodeId = "root"; selEdgeIdx = null;
+    save(); render();
+    selectNode("root");
+  });
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Delete" && ev.key !== "Backspace") return;
+    var tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (selEdgeIdx !== null || (selNodeId && selNodeId !== "root")) {
+      ev.preventDefault();
+      deleteSelected();
+    }
+  });
+
+  /* ---------- boot ---------- */
+  render();
+  selectNode("root");
+})();
+</script>
+
+<script>
+(function () {
+  var btn = document.getElementById("simRun");
+  if (!btn) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var agents = ["orch", "w1", "w2", "w3", "ver"];
+  var tokens = {};
+  var spendEl = $("simSpend"), gaugeEl = $("simGauge"), iterEl = $("simIter"),
+      decEl = $("simDecision"), stream = $("simThoughts");
+  var CEIL = 10;
+
+  function pill(id, state, text) {
+    var el = $("st-" + id);
+    el.className = "pill" + (state ? " st-" + state : "");
+    el.textContent = text;
+  }
+  function task(id, t) { $("task-" + id).textContent = t; }
+  function tok(id, add) {
+    tokens[id] = (tokens[id] || 0) + add;
+    $("tk-" + id).textContent = tokens[id] >= 1000 ? (tokens[id] / 1000).toFixed(1) + "k" : String(tokens[id]);
+  }
+  function stage(n) {
+    var chips = document.querySelectorAll(".stg");
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].classList.toggle("on", chips[i].getAttribute("data-s") === String(n));
+    }
+  }
+  function spend(usd) {
+    spendEl.textContent = "$" + usd.toFixed(2);
+    gaugeEl.style.width = Math.min(100, usd / CEIL * 100) + "%";
+    gaugeEl.style.background = usd / CEIL > 0.8 ? "var(--stop)" : "var(--harness)";
+  }
+  function think(who, cls, text) {
+    var d = document.createElement("div");
+    d.className = "thought";
+    var b = document.createElement("b");
+    b.className = cls; b.textContent = who;
+    d.appendChild(b);
+    d.appendChild(document.createTextNode(" " + text));
+    stream.appendChild(d);
+    stream.scrollTop = stream.scrollHeight;
+  }
+  function reset() {
+    agents.forEach(function (a) { tokens[a] = 0; pill(a, "", "idle"); task(a, "—"); $("tk-" + a).textContent = "0"; });
+    stream.innerHTML = "";
+    spend(0); stage(0);
+    iterEl.textContent = "1"; decEl.textContent = "running";
+  }
+
+  var steps = [
+    function () { reset(); stage(1); think("harness", "h", "T1 · brief loaded, 2 memory entries recalled: auth-refresh gotcha, flaky-mock cleanup."); },
+    function () { stage(2); pill("orch", "run", "run"); task("orch", "ceiling test + plan"); tok("orch", 1400); think("orchestrator", "s", "T2 · scope is wide — 3 independent failures. Splitting into t-1, t-2, t-3."); spend(0.31); },
+    function () { stage(3); pill("orch", "pass", "done"); task("orch", "—"); ["w1", "w2", "w3"].forEach(function (w) { pill(w, "run", "run"); }); task("w1", "t-1 refresh-token fix"); task("w2", "t-2 expiry test"); task("w3", "t-3 mock cleanup"); tok("w1", 2600); tok("w2", 3100); tok("w3", 2200); spend(0.74); },
+    function () { think("worker-2", "s", "t-2 · expiry boundary is UTC-sensitive — pinning the clock in the fixture."); tok("w1", 3900); tok("w2", 4100); tok("w3", 2900); spend(1.12); },
+    function () { pill("w1", "pass", "done"); pill("w2", "pass", "done"); pill("w3", "pass", "done"); think("worker-1", "s", "t-1 · patch ready: refresh path now rotates tokens. Claims attached."); },
+    function () { stage(4); pill("ver", "run", "run"); task("ver", "pytest tests/auth -q"); tok("ver", 1800); think("verifier", "x", "T4 · running every check against success_criteria — claims are evidence of nothing."); },
+    function () { pill("ver", "fail", "fail"); think("verifier", "x", "t-2 rejected: test_auth_refresh still red. Requeueing."); stage(5); think("loop", "l", "T5 · verifier failed, budget fine (iteration 1/8, $1.41/$10) → continue."); decEl.textContent = "continue"; spend(1.41); },
+    function () { iterEl.textContent = "2"; stage(3); pill("w2", "run", "run"); task("w2", "t-2 requeue: apply fixture clock"); tok("w2", 3600); think("worker-2", "s", "t-2 · root cause: pinned clock never reached the refresh path. Patching call site."); spend(1.77); },
+    function () { pill("w2", "pass", "done"); stage(4); pill("ver", "run", "run"); tok("ver", 1600); },
+    function () { pill("ver", "pass", "pass"); think("verifier", "x", "All checks green: 0 failures, lint clean, scope respected."); stage(5); decEl.textContent = "stop — verifier pass"; think("loop", "l", "T5 · stop condition met on iteration 2 of 8. Halting well under ceiling."); spend(2.05); },
+    function () { stage(6); think("harness", "h", "T6 · crystallized “auth refresh depends on fixture clock” → memory. Tick record written; usage counts bumped."); spend(2.14); agents.forEach(function (a) { task(a, "—"); }); btn.disabled = false; btn.textContent = "▶ simulate again"; }
+  ];
+
+  btn.addEventListener("click", function () {
+    btn.disabled = true; btn.textContent = "running…";
+    var i = 0;
+    (function next() {
+      steps[i++]();
+      if (i < steps.length) setTimeout(next, 850);
+    })();
+  });
+})();
+</script>

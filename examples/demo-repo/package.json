@@ -1,0 +1,9 @@
+{
+  "name": "arbor-demo-repo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tiny repo with a deliberately failing test — ARBOR's e2e target",
+  "scripts": {
+    "test": "node --test"
+  }
+}
