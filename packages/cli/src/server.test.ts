@@ -129,4 +129,103 @@ describe("arbor serve", () => {
     const memory = (await (await fetch(`${base}/api/memory`)).json()) as Array<{ usage_count: number }>;
     expect(memory.length).toBeGreaterThan(0);
   });
+
+  it("exports the tree as a markdown zip", async () => {
+    expect((await fetch(`${base}/api/export.zip`)).status).toBe(404);
+    await fetch(`${base}/api/tree`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(plantedTree()),
+    });
+    const res = await fetch(`${base}/api/export.zip`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/zip");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(new DataView(bytes.buffer).getUint32(0, true)).toBe(0x04034b50); // PK local header
+    const text = new TextDecoder("latin1").decode(bytes);
+    expect(text).toContain("TREE.md");
+    expect(text).toContain("mission/harness/brief.md");
+  });
+
+  it("drafts node content via the node writer (fixture)", async () => {
+    await fetch(`${base}/api/tree`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(plantedTree()),
+    });
+    const res = await fetch(`${base}/api/suggest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nodeId: "verifier", fixture: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { text: string };
+    expect(body.text).toContain("make the check pass");
+    expect(body.text).toContain("worker");
+  });
+
+  it("routes a human-gate check-in through POST /api/checkin", async () => {
+    const tree = plantedTree();
+    tree.labels.budget.max_iterations = 4;
+    tree.nodes.push({
+      id: "human_gate",
+      type: "human_gate",
+      layer: "loop",
+      label: "human gate",
+      parent: "loop",
+      config: { interval_minutes: 0, timeout_minutes: 60 },
+    });
+    tree.edges.push({ from: "loop", to: "human_gate", kind: "data", on_schema_violation: "reject_and_requeue" });
+    // vary the failure output so the no-progress stop can't fire before the gate
+    tree.labels.metric_scope.metric = `node -e "console.log(Math.random()); process.exit(1)"`;
+    for (const n of tree.nodes) if (n.type === "brief") n.config = {};
+    await fetch(`${base}/api/tree`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(tree),
+    });
+
+    // answering with nothing pending is a 409
+    expect(
+      (await fetch(`${base}/api/checkin`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status,
+    ).toBe(409);
+
+    const ws = new WebSocket(`ws://127.0.0.1:${arbor.port}/ws`);
+    const seen: string[] = [];
+    let answered = 0;
+    const done = new Promise<{ outcome: string }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timed out; saw ${seen.join(",")}`)), 30_000);
+      ws.on("message", (raw) => {
+        const event = JSON.parse(String(raw)) as { type: string; outcome?: string };
+        seen.push(event.type);
+        if (event.type === "checkin") {
+          // first check-in: continue; second: stop
+          const action = answered++ === 0 ? "continue" : "stop";
+          void fetch(`${base}/api/checkin`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action }),
+          });
+        }
+        if (event.type === "run_end") {
+          clearTimeout(timer);
+          resolve({ outcome: event.outcome! });
+        }
+      });
+      ws.on("error", reject);
+    });
+    await new Promise<void>((resolve) => ws.on("open", () => resolve()));
+
+    await fetch(`${base}/api/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "mock" }),
+    });
+    const { outcome } = await done;
+    ws.close();
+
+    expect(outcome).toBe("human_stop");
+    expect(seen.filter((t) => t === "checkin")).toHaveLength(2);
+    expect(seen).toContain("checkin_result");
+  });
 });

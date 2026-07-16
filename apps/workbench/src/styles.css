@@ -121,6 +121,26 @@ svg .port:hover { stroke: var(--ink); }
   font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
   display: inline-block; padding: 2px 8px; border-radius: 3px; color: var(--paper); margin-bottom: 8px;
 }
+.hintbox {
+  margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 4px;
+  font-size: 12px; color: var(--ink-soft); background: var(--paper);
+}
+.hintbox b { color: var(--ink); }
+.hintbox .hintexample { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 4px; word-break: break-all; }
+.draftbox {
+  margin-top: 8px; padding: 10px 12px; border: 1px solid var(--harness); border-radius: 4px;
+  font-size: 13px; color: var(--ink-soft); background: var(--harness-soft);
+}
+.checkin {
+  border: 1px solid var(--swarm); background: var(--swarm-soft); border-radius: 6px;
+  padding: 14px; margin-bottom: 12px;
+}
+.checkin h4 { margin: 0 0 6px; font-family: var(--mono); font-size: 13px; color: var(--swarm); letter-spacing: 0.08em; text-transform: uppercase; }
+.checkin .row { font-size: 13.5px; color: var(--ink-soft); margin: 2px 0; }
+.checkin textarea {
+  width: 100%; margin-top: 8px; font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px; min-height: 54px; resize: vertical;
+}
 .violations { margin-top: 10px; }
 .violations .v { font-family: var(--mono); font-size: 12px; color: var(--stop); padding: 3px 0; }
 .savednote { font-family: var(--mono); font-size: 12px; color: var(--harness); }

@@ -1,11 +1,23 @@
 import type { ArborTree, TickRecord, Violation } from "@arbor/schema";
 
+export interface CheckinReport {
+  iteration: number;
+  max_iterations: number;
+  spend_usd: number;
+  ceiling_usd: number;
+  last_verdict: "pass" | "fail";
+  failing: string[];
+  next: string;
+  interval_minutes: number;
+}
+
 export interface StatusResponse {
   planted: boolean;
   running: boolean;
   goal: string | null;
   budget: { max_iterations: number; cost_ceiling_usd: number; no_progress_window: number } | null;
   project: string;
+  checkin: CheckinReport | null;
 }
 
 export interface MemoryEntry {
@@ -25,6 +37,8 @@ export type WsEvent =
   | { type: "spend"; usd_total: number; tokens_total: number; ceiling_usd: number }
   | { type: "tick"; record: TickRecord }
   | { type: "decision"; decision: string; iteration: number; max_iterations: number; reason: string }
+  | { type: "checkin"; report: CheckinReport }
+  | { type: "checkin_result"; action: "continue" | "revise" | "stop"; note: string | null }
   | { type: "run_end"; outcome: string; ticks: number; spend_usd: number; branch: string | null }
   | { type: "run_error"; message: string }
   | { type: "run_state"; running: boolean };
@@ -54,6 +68,18 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ mode }),
+    }),
+  checkin: (action: "continue" | "revise" | "stop", note?: string) =>
+    jsonFetch<{ ok: boolean }>("/api/checkin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, note }),
+    }),
+  suggest: (nodeId: string) =>
+    jsonFetch<{ text: string }>("/api/suggest", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nodeId }),
     }),
 };
 

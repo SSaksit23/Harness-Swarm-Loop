@@ -10,6 +10,7 @@ export const LoopDecisionSchema = z.enum([
   "stop_max_iterations",
   "stop_no_progress",
   "stop_cost_ceiling",
+  "stop_human",
 ]);
 export type LoopDecision = z.infer<typeof LoopDecisionSchema>;
 

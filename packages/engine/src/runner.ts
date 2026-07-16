@@ -11,12 +11,12 @@ import {
 } from "@arbor/schema";
 import type { FileStore, MemoryStore } from "@arbor/store";
 import type { AgentExecutor } from "./agents.js";
-import { EventBus } from "./events.js";
+import { EventBus, type CheckinAction, type CheckinReport, type HumanGate } from "./events.js";
 import { runChecks, type VerifierResult } from "./verifier.js";
 import { createSandbox } from "./sandbox.js";
 import { buildWorkerPrompt, executeWide, planWithContract, type Planner } from "./swarm.js";
 
-export type RunOutcome = "pass" | "max_iterations" | "no_progress" | "cost_ceiling";
+export type RunOutcome = "pass" | "max_iterations" | "no_progress" | "cost_ceiling" | "human_stop";
 
 export interface SwarmOptions {
   planner: Planner;
@@ -35,6 +35,8 @@ export interface RunOptions {
   sandbox?: boolean;
   /** Enable the swarm layer: orchestrator plans, workers fan out. Absent = single-agent. */
   swarm?: SwarmOptions;
+  /** Operator channel for human_gate check-ins (CLI readline, workbench button, ...). */
+  humanGate?: HumanGate;
 }
 
 export interface RunResult {
@@ -61,7 +63,7 @@ function criteriaFor(tree: ArborTree): SuccessCriterion[] {
   return fromBrief.length ? fromBrief : criteriaFromLabels(tree.labels);
 }
 
-function buildPrompt(tree: ArborTree, recalled: string[], lastFailure: VerifierResult | null): string {
+function buildPrompt(tree: ArborTree, recalled: string[], lastFailure: VerifierResult | null, guidance: string[] = []): string {
   const { labels } = tree;
   const parts: string[] = [
     `You are an autonomous engineering agent working inside a sandboxed checkout of a repository.`,
@@ -80,6 +82,9 @@ function buildPrompt(tree: ArborTree, recalled: string[], lastFailure: VerifierR
   }
   if (recalled.length) {
     parts.push(``, `## Lessons from previous runs (project memory)`, ...recalled.map((r) => `- ${r}`));
+  }
+  if (guidance.length) {
+    parts.push(``, `## Guidance from the operator (given mid-run — follow it)`, ...guidance.map((g) => `- ${g}`));
   }
   if (lastFailure) {
     parts.push(
@@ -148,6 +153,27 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
   let repeatedFailures = 0;
   let outcome: RunOutcome = "max_iterations";
   let ticksRun = 0;
+  /** Mid-run operator guidance from human_gate revisions, fed into every later prompt/plan. */
+  const guidance: string[] = [];
+
+  const gateNode = tree.nodes.find((n) => n.type === "human_gate");
+  const gate =
+    gateNode && opts.humanGate
+      ? {
+          intervalMs: Math.max(0, Number(gateNode.config.interval_minutes ?? 10)) * 60_000,
+          timeoutMs: Math.max(50, Number(gateNode.config.timeout_minutes ?? 60) * 60_000),
+          onTimeout: gateNode.config.on_timeout === "stop" ? ("stop" as const) : ("continue" as const),
+        }
+      : null;
+  if (gateNode && !opts.humanGate) {
+    events.emit({
+      type: "thought",
+      owner: "loop",
+      layer: "loop",
+      text: "human gate present but no operator channel connected — check-ins skipped",
+    });
+  }
+  let lastCheckin = Date.now();
 
   for (let iteration = 1; iteration <= budget.max_iterations; iteration++) {
     const startedAt = new Date().toISOString();
@@ -176,7 +202,7 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
         {
           goal: tree.labels.goal,
           criteria,
-          context: tree.labels.context,
+          context: [...tree.labels.context, ...guidance],
           outOfScope: tree.labels.out_of_scope,
           recalled,
           lastFailureSummary: lastFailure
@@ -228,7 +254,7 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
       agentResult = { summary: wide.summary, costUsd: wide.costUsd, tokens: wide.tokens };
     } else {
       events.emit({ type: "status", agent: executor.name, state: "running", task: tree.labels.goal });
-      const prompt = buildPrompt(tree, recalled, lastFailure);
+      const prompt = buildPrompt(tree, recalled, lastFailure, guidance);
       agentResult = await executor.execute({
         prompt,
         cwd: sandbox.dir,
@@ -286,6 +312,42 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
         reason = "verifier failed, budget remains";
       }
     }
+
+    // Human gate: on the configured interval, pause before continuing —
+    // report status + next step and wait for continue / revise / stop.
+    if (decision === "continue" && gate && Date.now() - lastCheckin >= gate.intervalMs) {
+      const report: CheckinReport = {
+        iteration,
+        max_iterations: budget.max_iterations,
+        spend_usd: spendUsd,
+        ceiling_usd: budget.cost_ceiling_usd,
+        last_verdict: verifierResult.verdict,
+        failing: verifierResult.checks.filter((c) => !c.ok).map((c) => c.criterion),
+        next: `re-plan from the failure output and retry (iteration ${iteration + 1}/${budget.max_iterations})`,
+        interval_minutes: gate.intervalMs / 60_000,
+      };
+      events.emit({ type: "checkin", report });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const answer = await Promise.race([
+        opts.humanGate!.ask(report),
+        new Promise<CheckinAction>((resolve) => {
+          timer = setTimeout(() => resolve({ action: gate.onTimeout, note: "check-in timed out" }), gate.timeoutMs);
+          (timer as { unref?: () => void }).unref?.();
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      events.emit({ type: "checkin_result", action: answer.action, note: answer.note ?? null });
+      lastCheckin = Date.now();
+      if (answer.action === "stop") {
+        decision = "stop_human";
+        reason = "operator stopped the run at check-in";
+        outcome = "human_stop";
+      } else if (answer.action === "revise" && answer.note?.trim()) {
+        guidance.push(answer.note.trim());
+        events.emit({ type: "thought", owner: "loop", layer: "loop", text: `operator guidance: ${answer.note.trim().slice(0, 140)}` });
+      }
+    }
+
     events.emit({ type: "decision", decision, iteration, max_iterations: budget.max_iterations, reason });
 
     // T6 — crystallize (a tick is not complete until it teaches)

@@ -13,8 +13,72 @@ const LAYER_COLOR: Record<string, string> = {
 };
 const NODE_TYPES: NodeType[] = [
   "mission", "harness", "brief", "memory", "skills", "swarm", "orchestrator",
-  "worker", "verifier", "loop", "contract", "hard_stops", "sandbox", "custom",
+  "worker", "verifier", "loop", "contract", "hard_stops", "sandbox", "human_gate", "custom",
 ];
+
+/** What to write in each node — shown in the inspector so nobody stares at an empty box. */
+const TYPE_HINTS: Record<NodeType, { hint: string; example: string }> = {
+  mission: {
+    hint: "The root. Its labels (goal, metric, budget) come from `arbor plant` — edit them there, not here.",
+    example: `{ "pos": { "x": 30, "y": 280 } }`,
+  },
+  harness: {
+    hint: "The standard: what the agent knows and must obey. Use config for run-wide rules.",
+    example: `{ "rules": ["never touch payments/", "prefer small diffs"] }`,
+  },
+  brief: {
+    hint: "Success criteria the verifier runs — each check is a shell command; exit 0 = pass.",
+    example: `{ "success_criteria": [{ "id": "tests", "check": "npm test", "pass_when": "exit 0" }] }`,
+  },
+  memory: {
+    hint: "Recall settings: how many lessons from past runs get injected each tick.",
+    example: `{ "recall_k": 5 }`,
+  },
+  skills: {
+    hint: "Reusable procedures promoted from repeated work. List skill names to mount.",
+    example: `{ "mount": ["fix-flaky-tests"] }`,
+  },
+  swarm: {
+    hint: "The workers. width_hint: auto lets the orchestrator run the ceiling test; narrow forces one agent.",
+    example: `{ "width_hint": "auto" }`,
+  },
+  orchestrator: {
+    hint: "Plans and splits (premium model). Config can steer how it decomposes work.",
+    example: `{ "model_tier": "premium", "max_tasks": 4 }`,
+  },
+  worker: {
+    hint: "Executes one task inside the sandbox (cheap model). Claims are never trusted — only verified.",
+    example: `{ "model_tier": "cheap" }`,
+  },
+  verifier: {
+    hint: "The thing that says no. on_fail: requeue retries next tick; fail_tick ends the tick.",
+    example: `{ "on_fail": "requeue" }`,
+  },
+  loop: {
+    hint: "The clock and the stop. Children: contract, hard stops, and optionally a human gate.",
+    example: `{}`,
+  },
+  contract: {
+    hint: "When a run triggers and how much one tick may attempt.",
+    example: `{ "trigger": "manual", "scope": "one mission per run" }`,
+  },
+  hard_stops: {
+    hint: "The three finite caps, enforced by the engine outside the model. Edit budgets via plant.",
+    example: `{ "max_iterations": 8, "cost_ceiling_usd": 10, "no_progress_window": 2 }`,
+  },
+  sandbox: {
+    hint: "Isolation for the run — a git worktree branch by default; the main checkout is never touched.",
+    example: `{ "fs": "worktree" }`,
+  },
+  human_gate: {
+    hint: "Human-in-the-loop: the loop pauses every interval_minutes, reports status + next step, and waits for continue / revise / stop. on_timeout decides what happens if nobody answers.",
+    example: `{ "interval_minutes": 10, "timeout_minutes": 60, "on_timeout": "continue" }`,
+  },
+  custom: {
+    hint: "Your node. Use config.notes for prose; add any keys your workflow needs — or let the AI draft it.",
+    example: `{ "notes": "receives task specs from the orchestrator, emits …" }`,
+  },
+};
 
 type Pos = { x: number; y: number };
 type Selection = { kind: "node"; id: string } | { kind: "edge"; index: number } | null;
@@ -28,22 +92,65 @@ function posOf(node: TreeNode): Pos | null {
   return p && typeof p.x === "number" && typeof p.y === "number" ? p : null;
 }
 
-/** Column layout for nodes without a saved position: root → branches → leaves. */
+/** Column layout for nodes without a saved position: root → branches → leaves → deeper. */
 function autoLayout(tree: ArborTree): Map<string, Pos> {
   const out = new Map<string, Pos>();
-  const cols: Record<number, TreeNode[]> = { 0: [], 1: [], 2: [] };
+  const depthOf = (n: TreeNode): number => {
+    let depth = 0;
+    let cur: TreeNode | undefined = n;
+    while (cur?.parent && depth < 3) {
+      cur = tree.nodes.find((p) => p.id === cur!.parent);
+      depth++;
+    }
+    return Math.min(depth, 3);
+  };
+  const cols: TreeNode[][] = [[], [], [], []];
   for (const n of tree.nodes) {
-    if (posOf(n)) continue;
-    const col = n.parent === null ? 0 : tree.nodes.find((p) => p.id === n.parent)?.parent === null ? 1 : 2;
-    cols[col].push(n);
+    if (!posOf(n)) cols[depthOf(n)].push(n);
   }
-  const colX = [36, 260, 480];
-  for (const [col, nodes] of Object.entries(cols)) {
-    const list = nodes as TreeNode[];
-    const gap = Math.min(70, (VB.h - 80) / Math.max(1, list.length));
-    list.forEach((n, i) => {
-      out.set(n.id, { x: colX[Number(col)], y: 64 + i * gap + (Number(col) === 0 ? VB.h / 2 - 64 - (list.length - 1) * gap * 0.5 : 0) });
-    });
+  const colX = [30, 235, 455, 620];
+  cols.forEach((list, col) => {
+    if (!list.length) return;
+    const gap = Math.max(H + 14, Math.min(80, (VB.h - 90) / list.length));
+    const totalHeight = (list.length - 1) * gap;
+    const yStart = col === 0 ? VB.h / 2 - totalHeight / 2 : Math.max(50, (VB.h - totalHeight) / 2 - 40);
+    list.forEach((n, i) => out.set(n.id, { x: colX[col], y: Math.max(H / 2 + 6, yStart + i * gap) }));
+  });
+  return out;
+}
+
+/**
+ * Never let two nodes overlap: rects that intersect get pushed apart
+ * vertically (wrapping into a fresh spot when the column runs out of room).
+ */
+function resolveCollisions(positions: Map<string, Pos>, nodes: TreeNode[], skip?: string): Map<string, Pos> {
+  const out = new Map(positions);
+  const PAD = 8;
+  for (let pass = 0; pass < 8; pass++) {
+    let moved = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const pa = out.get(a.id)!;
+        const pb = out.get(b.id)!;
+        const overlapX = pa.x < pb.x + nodeWidth(b) + PAD && pb.x < pa.x + nodeWidth(a) + PAD;
+        const overlapY = Math.abs(pa.y - pb.y) < H + PAD;
+        if (!overlapX || !overlapY) continue;
+        // move whichever isn't being dragged / isn't first
+        const victim = b.id === skip ? a : b;
+        const anchor = victim === b ? pa : pb;
+        const p = { ...out.get(victim.id)! };
+        p.y = anchor.y + H + PAD + 2;
+        if (p.y > VB.h - H / 2 - 6) {
+          p.y = H / 2 + 10;
+          p.x = Math.min(VB.w - nodeWidth(victim) - 6, p.x + 30);
+        }
+        out.set(victim.id, p);
+        moved = true;
+      }
+    }
+    if (!moved) break;
   }
   return out;
 }
@@ -81,11 +188,22 @@ export function Canvas() {
     | null
   >(null);
   const seq = useRef(0);
+  // Undo/redo live outside React state (StrictMode double-invokes updaters,
+  // so side effects in setTree callbacks would corrupt the stacks).
+  const treeRef = useRef<ArborTree | null>(null);
+  const undoStack = useRef<ArborTree[]>([]);
+  const redoStack = useRef<ArborTree[]>([]);
+  useEffect(() => {
+    treeRef.current = tree;
+  }, [tree]);
 
   const load = useCallback(() => {
     api
       .tree()
       .then((t) => {
+        undoStack.current = [];
+        redoStack.current = [];
+        treeRef.current = t;
         setTree(t);
         setError(null);
         setViolations([]);
@@ -101,16 +219,42 @@ export function Canvas() {
     const auto = autoLayout(tree);
     const map = new Map<string, Pos>();
     for (const n of tree.nodes) map.set(n.id, posOf(n) ?? auto.get(n.id) ?? { x: 300, y: 300 });
-    return map;
+    // keep the node being dragged where the pointer put it; nudge the others
+    return resolveCollisions(map, tree.nodes, dragRef.current?.kind === "move" ? dragRef.current.id : undefined);
   }, [tree]);
 
-  const mutate = useCallback((fn: (draft: ArborTree) => void) => {
-    setTree((prev) => {
-      if (!prev) return prev;
-      const next: ArborTree = JSON.parse(JSON.stringify(prev));
-      fn(next);
-      return next;
-    });
+  const mutate = useCallback((fn: (draft: ArborTree) => void, opts: { undoable?: boolean } = {}) => {
+    const current = treeRef.current;
+    if (!current) return;
+    if (opts.undoable !== false) {
+      undoStack.current.push(current);
+      if (undoStack.current.length > 60) undoStack.current.shift();
+      redoStack.current = [];
+    }
+    const next: ArborTree = JSON.parse(JSON.stringify(current));
+    fn(next);
+    treeRef.current = next;
+    setTree(next);
+    setDirty(true);
+    setSavedNote(null);
+  }, []);
+
+  const undo = useCallback(() => {
+    const prev = undoStack.current.pop();
+    if (!prev || !treeRef.current) return;
+    redoStack.current.push(treeRef.current);
+    treeRef.current = prev;
+    setTree(prev);
+    setDirty(true);
+    setSavedNote(null);
+  }, []);
+
+  const redo = useCallback(() => {
+    const next = redoStack.current.pop();
+    if (!next || !treeRef.current) return;
+    undoStack.current.push(treeRef.current);
+    treeRef.current = next;
+    setTree(next);
     setDirty(true);
     setSavedNote(null);
   }, []);
@@ -140,15 +284,23 @@ export function Canvas() {
     if (!drag || !tree) return;
     const p = svgPoint(e);
     if (drag.kind === "move") {
+      if (!drag.moved) {
+        // one undo entry per drag, not per pointer-move frame
+        undoStack.current.push(treeRef.current!);
+        redoStack.current = [];
+      }
       drag.moved = true;
       const node = tree.nodes.find((n) => n.id === drag.id)!;
       const w = nodeWidth(node);
       const x = Math.max(6, Math.min(VB.w - w - 6, p.x - drag.dx));
       const y = Math.max(H / 2 + 4, Math.min(VB.h - H / 2 - 4, p.y - drag.dy));
-      mutate((draft) => {
-        const n = draft.nodes.find((m) => m.id === drag.id)!;
-        n.config = { ...n.config, pos: { x: Math.round(x), y: Math.round(y) } };
-      });
+      mutate(
+        (draft) => {
+          const n = draft.nodes.find((m) => m.id === drag.id)!;
+          n.config = { ...n.config, pos: { x: Math.round(x), y: Math.round(y) } };
+        },
+        { undoable: false },
+      );
     } else {
       setTempLine({ x1: drag.x1, y1: drag.y1, x2: p.x, y2: p.y });
       setDropTarget(nodeAt(p, drag.from)?.id ?? null);
@@ -220,11 +372,20 @@ export function Canvas() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (document.activeElement?.tagName ?? "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
-      if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
+      const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        deleteSelected();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [deleteSelected]);
+  }, [deleteSelected, undo, redo]);
 
   const save = async () => {
     if (!tree) return;
@@ -263,6 +424,25 @@ export function Canvas() {
         <button className="btn" onClick={() => addNode(null)}>+ node</button>
         <button className="btn" onClick={() => addNode(selectedNode?.id ?? "root")}>+ sub-node</button>
         <button className="btn warn" onClick={deleteSelected}>delete selected</button>
+        <button className="btn" onClick={undo} title="Ctrl+Z">↩ undo</button>
+        <button className="btn" onClick={redo} title="Ctrl+Y / Ctrl+Shift+Z">↪ redo</button>
+        <button
+          className="btn"
+          title="clear saved positions and re-run the collision-free layout"
+          onClick={() =>
+            mutate((draft) => {
+              for (const n of draft.nodes) {
+                const { pos: _pos, ...rest } = n.config as { pos?: unknown };
+                n.config = rest;
+              }
+            })
+          }
+        >
+          ⌗ arrange
+        </button>
+        <button className="btn" onClick={() => (window.location.href = "/api/export.zip")} title="download the tree as markdown files (one per node, sub-nodes in folders)">
+          ⇩ export .zip
+        </button>
         <button className="btn primary" onClick={() => void save()} disabled={!dirty}>save tree</button>
         <button className="btn" onClick={load}>reload</button>
         {savedNote && <span className="savednote">{savedNote}</span>}
@@ -404,10 +584,28 @@ function NodeInspector({
 }) {
   const [configText, setConfigText] = useState(() => JSON.stringify(node.config, null, 2));
   const [configError, setConfigError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
   useEffect(() => {
     setConfigText(JSON.stringify(node.config, null, 2));
     setConfigError(null);
+    setDraft(null);
+    setDraftError(null);
   }, [node.id, node.config]);
+
+  const requestDraft = async () => {
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const { text } = await api.suggest(node.id);
+      setDraft(text);
+    } catch (e) {
+      setDraftError((e as Error).message);
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const inbound = edges.filter((e) => e.to === node.id);
   const outbound = edges.filter((e) => e.from === node.id);
@@ -435,6 +633,7 @@ function NodeInspector({
       <div className="k">config (JSON — applied on blur)</div>
       <textarea
         value={configText}
+        placeholder={TYPE_HINTS[node.type].example}
         onChange={(e) => setConfigText(e.target.value)}
         onBlur={() => {
           try {
@@ -446,6 +645,33 @@ function NodeInspector({
         }}
       />
       {configError && <div className="error">invalid JSON: {configError}</div>}
+      <div className="hintbox">
+        <b>what goes here:</b> {TYPE_HINTS[node.type].hint}
+        <div className="hintexample">e.g. {TYPE_HINTS[node.type].example}</div>
+      </div>
+
+      <div className="k">out of ideas?</div>
+      <button className="btn" onClick={() => void requestDraft()} disabled={drafting}>
+        {drafting ? "drafting…" : "✎ let the AI draft this node"}
+      </button>
+      {draftError && <div className="error">{draftError}</div>}
+      {draft && (
+        <div className="draftbox">
+          <div>{draft}</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button
+              className="btn primary"
+              onClick={() => {
+                onChange({ config: { ...node.config, notes: draft } });
+                setDraft(null);
+              }}
+            >
+              apply to config.notes
+            </button>
+            <button className="btn" onClick={() => setDraft(null)}>discard</button>
+          </div>
+        </div>
+      )}
       <div className="k">connections</div>
       <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--ink-soft)" }}>
         {inbound.map((e, i) => (

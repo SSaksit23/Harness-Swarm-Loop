@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { ArborTreeSchema, validateInvariants } from "@arbor/schema";
+import { ArborTreeSchema, buildZip, treeToMarkdownFiles, validateInvariants } from "@arbor/schema";
 import { FileStore, SqliteMemoryStore } from "@arbor/store";
 import {
   EventBus,
@@ -12,7 +12,11 @@ import {
   ScriptedAgent,
   SdkAgent,
   runLoop,
+  suggestNodeText,
   type ArborEvent,
+  type CheckinAction,
+  type CheckinReport,
+  type HumanGate,
   type SwarmOptions,
 } from "@arbor/engine";
 
@@ -26,6 +30,11 @@ interface RunRequest {
   mode?: "mock" | "real" | "swarm";
   model?: string;
   workers?: number;
+}
+
+interface PendingCheckin {
+  report: CheckinReport;
+  resolve: (action: CheckinAction) => void;
 }
 
 const WORKBENCH_DIST = fileURLToPath(new URL("../../../apps/workbench/dist", import.meta.url));
@@ -65,6 +74,7 @@ export function createArborServer(projectDir: string): ArborServer {
 
   const sockets = new Set<WebSocket>();
   let running = false;
+  let pendingCheckin: PendingCheckin | null = null;
 
   const broadcast = (event: ArborEvent | { type: "run_error"; message: string } | { type: "run_state"; running: boolean }) => {
     const payload = JSON.stringify(event);
@@ -94,16 +104,32 @@ export function createArborServer(projectDir: string): ArborServer {
     running = true;
     broadcast({ type: "run_state", running: true });
 
+    // The runner emits the `checkin` event itself; the server just parks the
+    // resolver until POST /api/checkin (or the engine-side timeout) answers.
+    const humanGate: HumanGate = {
+      ask: (report) =>
+        new Promise<CheckinAction>((resolve) => {
+          pendingCheckin = {
+            report,
+            resolve: (action) => {
+              pendingCheckin = null;
+              resolve(action);
+            },
+          };
+        }),
+    };
+
     void (async () => {
       const memory = new SqliteMemoryStore(files.dbPath, path.basename(projectDir));
       try {
         const tree = files.readTree();
-        await runLoop({ projectDir, tree, files, memory, executor, events, swarm });
+        await runLoop({ projectDir, tree, files, memory, executor, events, swarm, humanGate });
       } catch (err) {
         broadcast({ type: "run_error", message: err instanceof Error ? err.message : String(err) });
       } finally {
         memory.close();
         running = false;
+        pendingCheckin = null;
         broadcast({ type: "run_state", running: false });
       }
     })();
@@ -122,6 +148,7 @@ export function createArborServer(projectDir: string): ArborServer {
           goal: tree?.labels.goal ?? null,
           budget: tree?.labels.budget ?? null,
           project: path.basename(projectDir),
+          checkin: pendingCheckin?.report ?? null,
         });
       }
       if (url.pathname === "/api/tree" && req.method === "GET") {
@@ -163,6 +190,34 @@ export function createArborServer(projectDir: string): ArborServer {
       if (url.pathname === "/api/run" && req.method === "POST") {
         const result = startRun((await readBody(req)) as RunRequest);
         return json(res, result.ok ? 202 : 409, result);
+      }
+      if (url.pathname === "/api/checkin" && req.method === "POST") {
+        const body = (await readBody(req)) as { action?: string; note?: string };
+        if (!pendingCheckin) return json(res, 409, { error: "no check-in is waiting for an answer" });
+        const action = body.action === "stop" || body.action === "revise" ? body.action : "continue";
+        pendingCheckin.resolve({ action, note: body.note });
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === "/api/export.zip" && req.method === "GET") {
+        if (!files.hasTree()) return json(res, 404, { error: "no tree planted" });
+        const zip = buildZip(treeToMarkdownFiles(files.readTree()));
+        res.writeHead(200, {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="arbor-${path.basename(projectDir)}.zip"`,
+          "content-length": zip.length,
+        });
+        return res.end(Buffer.from(zip));
+      }
+      if (url.pathname === "/api/suggest" && req.method === "POST") {
+        if (!files.hasTree()) return json(res, 404, { error: "no tree planted" });
+        const body = (await readBody(req)) as { nodeId?: string; fixture?: boolean };
+        if (!body.nodeId) return json(res, 400, { error: "nodeId is required" });
+        try {
+          const result = await suggestNodeText(files.readTree(), body.nodeId, { fixture: body.fixture });
+          return json(res, 200, result);
+        } catch (err) {
+          return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
       }
 
       // Static workbench (built) or a hint page.

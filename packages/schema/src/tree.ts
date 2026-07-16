@@ -15,6 +15,7 @@ export const NodeTypeSchema = z.enum([
   "contract",
   "hard_stops",
   "sandbox",
+  "human_gate",
   "custom",
 ]);
 export type NodeType = z.infer<typeof NodeTypeSchema>;

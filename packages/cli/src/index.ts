@@ -48,6 +48,19 @@ function renderEvent(e: ArborEvent): void {
     case "decision":
       console.log(pc.bold(`  loop decision: ${e.decision} `) + pc.dim(`(iteration ${e.iteration}/${e.max_iterations} — ${e.reason})`));
       break;
+    case "checkin":
+      console.log(
+        pc.yellow(
+          pc.bold(
+            `⏸ check-in — iteration ${e.report.iteration}/${e.report.max_iterations} · spend $${e.report.spend_usd.toFixed(2)}/$${e.report.ceiling_usd.toFixed(2)} · verifier ${e.report.last_verdict}${e.report.failing.length ? ` (failing: ${e.report.failing.join(", ")})` : ""}`,
+          ),
+        ),
+      );
+      console.log(pc.dim(`  next: ${e.report.next}`));
+      break;
+    case "checkin_result":
+      console.log(pc.dim(`  operator answered: ${e.action}${e.note ? ` — ${e.note}` : ""}`));
+      break;
     case "run_end":
       console.log("");
       console.log(pc.bold(e.outcome === "pass" ? pc.green(`✔ run complete: ${e.outcome}`) : pc.red(`■ run halted: ${e.outcome}`)));
@@ -167,8 +180,29 @@ program
       ),
     );
 
+    // Human-gate answers come from this terminal when it's interactive; a
+    // non-TTY run leaves the channel unset (the engine skips check-ins).
+    const humanGate = process.stdin.isTTY
+      ? {
+          ask: async () => {
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+            try {
+              const answer = (await rl.question(pc.yellow("  continue [c] / revise [r] / stop [s]? "))).trim().toLowerCase();
+              if (answer === "s" || answer === "stop") return { action: "stop" as const };
+              if (answer === "r" || answer === "revise") {
+                const note = await rl.question("  guidance for the agent: ");
+                return { action: "revise" as const, note };
+              }
+              return { action: "continue" as const };
+            } finally {
+              rl.close();
+            }
+          },
+        }
+      : undefined;
+
     try {
-      await runLoop({ projectDir: dir, tree, files, memory, executor, events, sandbox: opts.sandbox, swarm });
+      await runLoop({ projectDir: dir, tree, files, memory, executor, events, sandbox: opts.sandbox, swarm, humanGate });
     } catch (err) {
       if (err instanceof InvariantError) {
         console.error(pc.red(err.message));
