@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: typecheck (packages)
+        run: npx tsc --noEmit
+      - name: typecheck (workbench)
+        run: npx tsc --noEmit -p apps/workbench
+      # The whole suite is offline by design — mock agents, fixture compiler,
+      # scripted planners. No ANTHROPIC_API_KEY in CI, ever.
+      - name: tests
+        run: npx vitest run
+      - name: build workbench
+        run: npm run build -w apps/workbench
