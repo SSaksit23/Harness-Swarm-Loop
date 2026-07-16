@@ -206,6 +206,23 @@ program
     memory.close();
   });
 
+program
+  .command("serve")
+  .description("start the workbench backend: HTTP API + websocket event feed")
+  .option("-p, --port <n>", "port to listen on", "4177")
+  .action(async (opts: { port: string }) => {
+    const dir = path.resolve(program.opts().dir);
+    const { createArborServer } = await import("./server.js");
+    const arbor = createArborServer(dir);
+    const port = Math.max(1, Number(opts.port) || 4177);
+    arbor.server.listen(port, () => {
+      console.log(pc.green(`arbor serve — project ${pc.bold(path.basename(dir))}`));
+      console.log(`  api  ${pc.cyan(`http://localhost:${port}/api/status`)}`);
+      console.log(`  ws   ${pc.cyan(`ws://localhost:${port}/ws`)}`);
+      console.log(pc.dim(`  workbench dev UI: npm run dev -w apps/workbench (proxies to this port)`));
+    });
+  });
+
 const memoryCmd = program.command("memory").description("inspect crystallized project memory");
 memoryCmd
   .command("ls")

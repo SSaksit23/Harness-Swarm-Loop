@@ -169,6 +169,15 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
+  /** Index rows (name, usage, recency) — the Library screen's curation view. */
+  listIndexed(): Array<{ name: string; usage_count: number; last_used: string | null; source_tick: number | null }> {
+    return this.db
+      .prepare(
+        "SELECT name, usage_count, last_used, source_tick FROM memory WHERE project = ? ORDER BY usage_count DESC, name",
+      )
+      .all(this.project) as Array<{ name: string; usage_count: number; last_used: string | null; source_tick: number | null }>;
+  }
+
   count(): number {
     const row = this.db.prepare("SELECT COUNT(*) AS n FROM memory WHERE project = ?").get(this.project) as {
       n: number;
