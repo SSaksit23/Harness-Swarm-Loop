@@ -39,6 +39,8 @@ describe("FileStore", () => {
       tick: 1,
       started_at: new Date().toISOString(),
       ended_at: new Date().toISOString(),
+      mode: "sequential",
+      swarm_tasks: [],
       agent_summary: "did a thing",
       verifier: { verdict: "fail", checks: [{ criterion: "metric", ok: false, exit_code: 1, output: "boom" }] },
       loop_decision: "continue",

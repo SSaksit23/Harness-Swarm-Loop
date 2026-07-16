@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SwarmTaskResultSchema } from "./swarm.js";
 
 export const VerdictSchema = z.enum(["pass", "fail"]);
 export type Verdict = z.infer<typeof VerdictSchema>;
@@ -25,6 +26,8 @@ export const TickRecordSchema = z.object({
   tick: z.number().int().positive(),
   started_at: z.string(),
   ended_at: z.string(),
+  mode: z.enum(["sequential", "wide"]).default("sequential"),
+  swarm_tasks: z.array(SwarmTaskResultSchema).default([]),
   agent_summary: z.string().default(""),
   verifier: z.object({
     verdict: VerdictSchema,

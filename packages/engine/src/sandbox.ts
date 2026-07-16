@@ -11,8 +11,17 @@ export interface Sandbox {
   finalize(message: string): Promise<string | null>;
 }
 
-async function git(args: string[], cwd: string) {
+export async function git(args: string[], cwd: string) {
   return execa("git", args, { cwd, reject: false });
+}
+
+/** Stage and commit everything in `dir` if anything changed. Returns true when a commit was made. */
+export async function commitAll(dir: string, message: string): Promise<boolean> {
+  await git(["add", "-A"], dir);
+  const status = await git(["status", "--porcelain"], dir);
+  if (!status.stdout.trim()) return false;
+  const res = await git(["commit", "-m", message], dir);
+  return res.exitCode === 0;
 }
 
 async function isGitRepo(dir: string): Promise<boolean> {

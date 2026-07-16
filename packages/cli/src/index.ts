@@ -7,12 +7,14 @@ import { FileStore, SqliteMemoryStore } from "@arbor/store";
 import {
   EventBus,
   InvariantError,
+  LlmPlanner,
   MODEL_TIERS,
   ScriptedAgent,
   SdkAgent,
   compileLabels,
   runLoop,
   type ArborEvent,
+  type SwarmOptions,
 } from "@arbor/engine";
 
 const STAGE_NAMES: Record<number, string> = {
@@ -130,9 +132,11 @@ program
   .command("run")
   .description("run the loop: load context → execute → verify → decide → crystallize")
   .option("--mock", "use a no-op scripted agent (exercises the hard stops, no API calls)", false)
-  .option("--model <id>", "model for the real agent", MODEL_TIERS.premium)
+  .option("--model <id>", "model for the sequential agent / orchestrator", MODEL_TIERS.premium)
+  .option("--swarm", "enable the swarm layer: orchestrator plans, workers fan out on the cheap tier", false)
+  .option("--workers <n>", "max parallel workers in swarm mode", "3")
   .option("--no-sandbox", "run in place instead of a git worktree")
-  .action(async (opts: { mock: boolean; model: string; sandbox: boolean }) => {
+  .action(async (opts: { mock: boolean; model: string; swarm: boolean; workers: string; sandbox: boolean }) => {
     const dir = path.resolve(program.opts().dir);
     const { files, memory } = stores(dir);
     const tree = files.readTree();
@@ -140,12 +144,31 @@ program
     const events = new EventBus();
     events.on(renderEvent);
 
+    if (opts.mock && opts.swarm) {
+      console.error(pc.red("--mock and --swarm cannot be combined (the mock agent exists to exercise the hard stops)"));
+      process.exitCode = 1;
+      memory.close();
+      return;
+    }
+
     const executor = opts.mock ? new ScriptedAgent([], 0.25) : new SdkAgent(opts.model);
+    const swarm: SwarmOptions | undefined = opts.swarm
+      ? {
+          planner: new LlmPlanner(opts.model),
+          makeWorker: () => new SdkAgent(MODEL_TIERS.cheap),
+          maxParallel: Math.max(1, Number(opts.workers) || 3),
+        }
+      : undefined;
+
     console.log(pc.bold(`goal: ${tree.labels.goal}`));
-    console.log(pc.dim(`agent: ${executor.name}${opts.mock ? " (mock)" : ` (${opts.model})`} · budget: ${tree.labels.budget.max_iterations} iters / $${tree.labels.budget.cost_ceiling_usd} / no-progress ${tree.labels.budget.no_progress_window}\n`));
+    console.log(
+      pc.dim(
+        `agent: ${executor.name}${opts.mock ? " (mock)" : ` (${opts.model})`}${swarm ? ` · swarm: ${opts.model} plans, ${MODEL_TIERS.cheap} executes (≤${swarm.maxParallel} parallel)` : ""} · budget: ${tree.labels.budget.max_iterations} iters / $${tree.labels.budget.cost_ceiling_usd} / no-progress ${tree.labels.budget.no_progress_window}\n`,
+      ),
+    );
 
     try {
-      await runLoop({ projectDir: dir, tree, files, memory, executor, events, sandbox: opts.sandbox });
+      await runLoop({ projectDir: dir, tree, files, memory, executor, events, sandbox: opts.sandbox, swarm });
     } catch (err) {
       if (err instanceof InvariantError) {
         console.error(pc.red(err.message));

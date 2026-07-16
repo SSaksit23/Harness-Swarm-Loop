@@ -5,6 +5,8 @@ import {
   type ArborTree,
   type LoopDecision,
   type SuccessCriterion,
+  type SwarmTaskResult,
+  type TaskSpec,
   type TickRecord,
 } from "@arbor/schema";
 import type { FileStore, MemoryStore } from "@arbor/store";
@@ -12,8 +14,15 @@ import type { AgentExecutor } from "./agents.js";
 import { EventBus } from "./events.js";
 import { runChecks, type VerifierResult } from "./verifier.js";
 import { createSandbox } from "./sandbox.js";
+import { buildWorkerPrompt, executeWide, planWithContract, type Planner } from "./swarm.js";
 
 export type RunOutcome = "pass" | "max_iterations" | "no_progress" | "cost_ceiling";
+
+export interface SwarmOptions {
+  planner: Planner;
+  makeWorker: (task: TaskSpec, index: number) => AgentExecutor;
+  maxParallel?: number;
+}
 
 export interface RunOptions {
   projectDir: string;
@@ -24,6 +33,8 @@ export interface RunOptions {
   events?: EventBus;
   /** Disable the git-worktree sandbox and run in place (tests use temp dirs). */
   sandbox?: boolean;
+  /** Enable the swarm layer: orchestrator plans, workers fan out. Absent = single-agent. */
+  swarm?: SwarmOptions;
 }
 
 export interface RunResult {
@@ -153,18 +164,80 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
       text: `brief loaded; ${recalledHits.length} memory entr${recalledHits.length === 1 ? "y" : "ies"} recalled`,
     });
 
-    // T2/T3 — plan & execute (single-agent mode; the swarm layer lands in M6)
+    // T2 — plan: ceiling test decides wide (swarm fan-out) vs sequential.
+    let mode: TickRecord["mode"] = "sequential";
+    let taskResults: SwarmTaskResult[] = [];
+    let tasks: TaskSpec[] = [];
+    if (opts.swarm && tree.labels.width_hint !== "narrow") {
+      events.emit({ type: "stage", n: 2, label: "plan" });
+      events.emit({ type: "status", agent: opts.swarm.planner.name, state: "running", task: "ceiling test + plan" });
+      const validated = await planWithContract(
+        opts.swarm.planner,
+        {
+          goal: tree.labels.goal,
+          criteria,
+          context: tree.labels.context,
+          outOfScope: tree.labels.out_of_scope,
+          recalled,
+          lastFailureSummary: lastFailure
+            ? lastFailure.checks
+                .filter((c) => !c.ok)
+                .map((c) => `${c.criterion} failed: ${c.output.slice(0, 400)}`)
+                .join("\n")
+            : null,
+          widthHint: tree.labels.width_hint,
+        },
+        events,
+      );
+      spendUsd += validated.costUsd;
+      spendTokens += validated.tokens;
+      events.emit({ type: "status", agent: opts.swarm.planner.name, state: "idle" });
+      if (validated.plan.wide && validated.plan.tasks.length > 0) {
+        mode = "wide";
+        tasks = validated.plan.tasks;
+        events.emit({
+          type: "thought",
+          owner: opts.swarm.planner.name,
+          layer: "swarm",
+          text: `wide: ${tasks.length} tasks — ${tasks.map((t) => t.task_id).join(", ")}${validated.plan.reason ? ` (${validated.plan.reason.slice(0, 80)})` : ""}`,
+        });
+      } else {
+        events.emit({
+          type: "thought",
+          owner: opts.swarm.planner.name,
+          layer: "swarm",
+          text: `sequential${validated.plan.reason ? `: ${validated.plan.reason.slice(0, 100)}` : ""}`,
+        });
+      }
+    }
+
+    // T3 — execute: fan out to workers (wide) or run the single agent.
     events.emit({ type: "stage", n: 3, label: "execute" });
-    events.emit({ type: "status", agent: executor.name, state: "running", task: tree.labels.goal });
-    const prompt = buildPrompt(tree, recalled, lastFailure);
-    const agentResult = await executor.execute({
-      prompt,
-      cwd: sandbox.dir,
-      onThought: (text) => events.emit({ type: "thought", owner: executor.name, layer: "swarm", text }),
-    });
+    let agentResult: { summary: string; costUsd: number; tokens: number };
+    if (mode === "wide" && opts.swarm) {
+      const wide = await executeWide({
+        projectDir: opts.projectDir,
+        sandbox,
+        tasks,
+        makeWorker: opts.swarm.makeWorker,
+        buildTaskPrompt: (task) => buildWorkerPrompt(task, tree.labels),
+        events,
+        maxParallel: opts.swarm.maxParallel,
+      });
+      taskResults = wide.taskResults;
+      agentResult = { summary: wide.summary, costUsd: wide.costUsd, tokens: wide.tokens };
+    } else {
+      events.emit({ type: "status", agent: executor.name, state: "running", task: tree.labels.goal });
+      const prompt = buildPrompt(tree, recalled, lastFailure);
+      agentResult = await executor.execute({
+        prompt,
+        cwd: sandbox.dir,
+        onThought: (text) => events.emit({ type: "thought", owner: executor.name, layer: "swarm", text }),
+      });
+      events.emit({ type: "status", agent: executor.name, state: "idle" });
+    }
     spendUsd += agentResult.costUsd;
     spendTokens += agentResult.tokens;
-    events.emit({ type: "status", agent: executor.name, state: "idle" });
     events.emit({ type: "spend", usd_total: spendUsd, tokens_total: spendTokens, ceiling_usd: budget.cost_ceiling_usd });
 
     // T4 — verify (claims are evidence of nothing)
@@ -238,6 +311,8 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
       tick: tickNumber,
       started_at: startedAt,
       ended_at: new Date().toISOString(),
+      mode,
+      swarm_tasks: taskResults,
       agent_summary: agentResult.summary,
       verifier: verifierResult,
       loop_decision: decision,
