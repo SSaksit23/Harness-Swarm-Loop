@@ -24,8 +24,14 @@ export interface Attachment {
 export const MAX_ATTACHMENT_BYTES = 262_144; // 256KB — attachments are reference text, not blobs
 
 function safeSegment(raw: string): string {
-  // basename only, safe charset, extension preserved — used for node ids and filenames alike
-  const base = path.basename(raw).replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^\.+/, "");
+  // last path segment, safe charset, extension preserved — used for node ids
+  // and filenames alike. Split on BOTH separators explicitly: path.basename
+  // is OS-dependent and ignores backslashes on Linux.
+  const last = raw.split(/[\\/]/).pop() ?? "";
+  const base = last
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/\.{2,}/g, ".") // no ".." survives, ever
+    .replace(/^[.-]+/, "");
   return base || "file";
 }
 
