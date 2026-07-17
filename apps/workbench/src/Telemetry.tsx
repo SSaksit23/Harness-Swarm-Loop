@@ -1,68 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { TickRecord } from "@arbor/schema";
-import { api, subscribeEvents, type CheckinReport, type WsEvent } from "./api.js";
-
-interface AgentRow {
-  state: "idle" | "running" | "pass" | "fail" | "halted";
-  task: string;
-}
-
-const TASK_COLORS = ["var(--swarm)", "var(--loop)", "var(--harness)", "var(--stop)", "var(--ink-faint)"];
-
-/**
- * Stacked bar per tick: wide ticks split into one segment per swarm task
- * (plus a planner remainder), sequential ticks are a single bar.
- */
-function TokenChart({ ticks }: { ticks: TickRecord[] }) {
-  if (ticks.length === 0) return <div className="empty">no runs recorded yet</div>;
-
-  const CHART_H = 130;
-  const BAR_W = 34;
-  const GAP = 14;
-  const width = Math.max(320, ticks.length * (BAR_W + GAP) + 20);
-  const totals = ticks.map((t) => Math.max(t.spend_delta.tokens, t.swarm_tasks.reduce((s, x) => s + x.tokens, 0), 1));
-  const max = Math.max(...totals);
-  const scale = (tokens: number) => (tokens / max) * (CHART_H - 26);
-  const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${width} ${CHART_H + 24}`} width={width} height={CHART_H + 24} role="img" aria-label="tokens per task per tick">
-        {ticks.map((t, i) => {
-          const x = 10 + i * (BAR_W + GAP);
-          const segments =
-            t.swarm_tasks.length > 0
-              ? (() => {
-                  const taskTokens = t.swarm_tasks.map((s) => ({ label: `${s.task_id}${s.ok ? "" : " (failed)"}`, tokens: s.tokens }));
-                  const planner = t.spend_delta.tokens - taskTokens.reduce((s, x) => s + x.tokens, 0);
-                  return planner > 0 ? [{ label: "orchestrator", tokens: planner }, ...taskTokens] : taskTokens;
-                })()
-              : [{ label: "agent", tokens: t.spend_delta.tokens }];
-          let y = CHART_H;
-          return (
-            <g key={t.tick}>
-              {segments.map((seg, si) => {
-                const h = Math.max(scale(seg.tokens), seg.tokens > 0 ? 2 : 0);
-                y -= h;
-                return (
-                  <rect key={si} x={x} y={y} width={BAR_W} height={h} rx={1.5} fill={TASK_COLORS[si % TASK_COLORS.length]} opacity={0.9}>
-                    <title>{`tick ${t.tick} · ${seg.label}: ${seg.tokens.toLocaleString()} tokens`}</title>
-                  </rect>
-                );
-              })}
-              <text x={x + BAR_W / 2} y={y - 4} textAnchor="middle" style={{ font: "9px var(--mono)", fill: "var(--ink-faint)" }}>
-                {fmt(totals[i])}
-              </text>
-              <text x={x + BAR_W / 2} y={CHART_H + 14} textAnchor="middle" style={{ font: "10px var(--mono)", fill: "var(--ink-soft)" }}>
-                #{t.tick}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
+import { api } from "./api.js";
+import { runStore } from "./runstore.js";
 
 const STAGES: Array<{ n: number; label: string }> = [
   { n: 1, label: "T1 load" },
@@ -76,86 +15,44 @@ const STAGES: Array<{ n: number; label: string }> = [
 export function Telemetry({
   running,
   budget,
+  onBudgetChanged,
 }: {
   running: boolean;
   budget: { max_iterations: number; cost_ceiling_usd: number } | null;
+  onBudgetChanged: () => void;
 }) {
-  const [agents, setAgents] = useState<Map<string, AgentRow>>(new Map());
-  const [stage, setStage] = useState(0);
-  const [spend, setSpend] = useState({ usd: 0, tokens: 0, ceiling: budget?.cost_ceiling_usd ?? 10 });
-  const [decision, setDecision] = useState("not started");
-  const [iteration, setIteration] = useState<string>("–");
-  const [thoughts, setThoughts] = useState<Array<{ owner: string; layer: string; text: string }>>([]);
-  const [ticks, setTicks] = useState<TickRecord[]>([]);
+  // Live run state survives tab switches — it lives in runstore, not here.
+  const snap = useSyncExternalStore(runStore.subscribe, runStore.getSnapshot);
+  const [diskTicks, setDiskTicks] = useState<TickRecord[]>([]);
   const [runMsg, setRunMsg] = useState<string | null>(null);
-  const [checkin, setCheckin] = useState<CheckinReport | null>(null);
   const [reviseNote, setReviseNote] = useState("");
+  const [ceilingText, setCeilingText] = useState("");
+  const [itersText, setItersText] = useState("");
+  const [budgetMsg, setBudgetMsg] = useState<string | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void api.ticks().then(setTicks).catch(() => undefined);
-    // a check-in may already be waiting (e.g. the page was reloaded mid-gate)
-    void api.status().then((s) => setCheckin(s.checkin)).catch(() => undefined);
+    void api.ticks().then(setDiskTicks).catch(() => undefined);
+    void api.status().then((s) => {
+      if (s.checkin) runStore.getSnapshot(); // pending check-in arrives via ws snapshot on reload too
+      setCeilingText(String(s.budget?.cost_ceiling_usd ?? ""));
+      setItersText(String(s.budget?.max_iterations ?? ""));
+    }).catch(() => undefined);
   }, []);
 
-  // Subscribe directly to the shared feed — one handler call per event frame,
-  // so nothing coalesces away under React state batching.
-  useEffect(() => subscribeEvents(handleEvent), []);
-
-  function handleEvent(e: WsEvent): void {
-    switch (e.type) {
-      case "status":
-        setAgents((prev) => new Map(prev).set(e.agent, { state: e.state, task: e.task ?? "" }));
-        break;
-      case "stage":
-        setStage(e.n);
-        break;
-      case "spend":
-        setSpend({ usd: e.usd_total, tokens: e.tokens_total, ceiling: e.ceiling_usd });
-        break;
-      case "thought":
-        setThoughts((prev) => [...prev.slice(-199), { owner: e.owner, layer: e.layer, text: e.text }]);
-        break;
-      case "decision":
-        setDecision(`${e.decision} — ${e.reason}`);
-        setIteration(`${e.iteration}/${e.max_iterations}`);
-        break;
-      case "tick":
-        setTicks((prev) => [...prev.filter((t) => t.tick !== e.record.tick), e.record].sort((a, b) => a.tick - b.tick));
-        break;
-      case "checkin":
-        setCheckin(e.report);
-        break;
-      case "checkin_result":
-        setCheckin(null);
-        break;
-      case "run_state":
-        if (e.running) {
-          setAgents(new Map());
-          setThoughts([]);
-          setStage(0);
-          setSpend((s) => ({ ...s, usd: 0, tokens: 0 }));
-          setDecision("running");
-          setRunMsg(null);
-        } else {
-          setCheckin(null);
-        }
-        break;
-      case "run_end":
-        setDecision(`run ${e.outcome} — ${e.ticks} ticks, $${e.spend_usd.toFixed(2)}${e.branch ? `, branch ${e.branch}` : ""}`);
-        void api.ticks().then(setTicks).catch(() => undefined);
-        break;
-      case "run_error":
-        setRunMsg(e.message);
-        break;
-      default:
-        break;
+  useEffect(() => {
+    if (!snap.running && snap.decision.startsWith("run ")) {
+      void api.ticks().then(setDiskTicks).catch(() => undefined);
     }
-  }
+  }, [snap.running, snap.decision]);
 
   useEffect(() => {
     streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight });
-  }, [thoughts]);
+  }, [snap.thoughts.length]);
+
+  const ticks = [...diskTicks.filter((t) => !snap.liveTicks.some((l) => l.tick === t.tick)), ...snap.liveTicks].sort(
+    (a, b) => a.tick - b.tick,
+  );
 
   const startRun = async (mode: "mock" | "real" | "swarm") => {
     setRunMsg(null);
@@ -169,27 +66,49 @@ export function Telemetry({
   const answerCheckin = async (action: "continue" | "revise" | "stop") => {
     try {
       await api.checkin(action, action === "revise" ? reviseNote : undefined);
-      setCheckin(null);
+      runStore.setCheckinAnswered();
       setReviseNote("");
     } catch (e) {
       setRunMsg((e as Error).message);
     }
   };
 
-  const pct = Math.min(100, (spend.usd / (spend.ceiling || 1)) * 100);
+  const applyBudget = async () => {
+    const ceiling = Number(ceilingText);
+    const iters = Math.round(Number(itersText));
+    if (!Number.isFinite(ceiling) || ceiling <= 0 || !Number.isFinite(iters) || iters <= 0) {
+      setBudgetMsg("ceiling and iterations must be positive numbers (invariant 3: every loop halts)");
+      return;
+    }
+    try {
+      const tree = await api.tree();
+      tree.labels.budget.cost_ceiling_usd = ceiling;
+      tree.labels.budget.max_iterations = iters;
+      const hardStops = tree.nodes.find((n) => n.type === "hard_stops");
+      if (hardStops) hardStops.config = { ...hardStops.config, cost_ceiling_usd: ceiling, max_iterations: iters };
+      await api.saveTree(tree);
+      setBudgetMsg(`budget updated ✓ — $${ceiling} / ${iters} iterations (takes effect on the next run)`);
+      onBudgetChanged();
+    } catch (e) {
+      setBudgetMsg((e as Error).message);
+    }
+  };
+
+  const pct = Math.min(100, (snap.spend.usd / (snap.spend.ceiling || 1)) * 100);
 
   return (
     <>
-      {checkin && (
+      {snap.checkin && (
         <div className="checkin">
           <h4>⏸ human gate — the loop is waiting for you</h4>
           <div className="row">
-            iteration {checkin.iteration}/{checkin.max_iterations} · spend ${checkin.spend_usd.toFixed(2)} of ${checkin.ceiling_usd.toFixed(2)} · verifier {checkin.last_verdict}
-            {checkin.failing.length > 0 && ` (failing: ${checkin.failing.join(", ")})`}
+            iteration {snap.checkin.iteration}/{snap.checkin.max_iterations} · spend ${snap.checkin.spend_usd.toFixed(2)} of $
+            {snap.checkin.ceiling_usd.toFixed(2)} · verifier {snap.checkin.last_verdict}
+            {snap.checkin.failing.length > 0 && ` (failing: ${snap.checkin.failing.join(", ")})`}
           </div>
-          <div className="row">next if you continue: {checkin.next}</div>
+          <div className="row">next if you continue: {snap.checkin.next}</div>
           <textarea
-            placeholder="optional guidance for the agent (used with “revise plan”), e.g. “stop editing the parser — the bug is in the fixture clock”"
+            placeholder="optional guidance for the agent (used with “revise plan”)"
             value={reviseNote}
             onChange={(e) => setReviseNote(e.target.value)}
           />
@@ -205,13 +124,14 @@ export function Telemetry({
         <button className="btn primary" onClick={() => void startRun("real")} disabled={running}>▶ run (real agent)</button>
         <button className="btn" onClick={() => void startRun("swarm")} disabled={running}>▶ run (swarm)</button>
         {runMsg && <span className="error">{runMsg}</span>}
+        {snap.running && <span className="savednote">run in progress — switching tabs won't lose it</span>}
       </div>
       <div className="telgrid">
         <div>
           <div className="card">
             <div className="k2">agents</div>
-            {agents.size === 0 && <div className="empty">no live run — press a run button, or watch a CLI run land here</div>}
-            {[...agents.entries()].map(([name, row]) => (
+            {snap.agents.length === 0 && <div className="empty">no live run — press a run button, or watch a CLI run land here</div>}
+            {snap.agents.map(([name, row]) => (
               <div className="agentrow" key={name}>
                 <span className="aname">{name}</span>
                 <span className={`pill ${row.state}`}>{row.state}</span>
@@ -222,8 +142,8 @@ export function Telemetry({
           <div className="card">
             <div className="k2">thought stream</div>
             <div className="thoughts" ref={streamRef}>
-              {thoughts.length === 0 && <div className="thought">waiting for events…</div>}
-              {thoughts.map((t, i) => (
+              {snap.thoughts.length === 0 && <div className="thought">waiting for events…</div>}
+              {snap.thoughts.map((t, i) => (
                 <div className="thought" key={i}>
                   <b className={t.layer}>[{t.owner}]</b> {t.text}
                 </div>
@@ -236,18 +156,26 @@ export function Telemetry({
             <div className="k2">overall process</div>
             <div className="stages">
               {STAGES.map((s) => (
-                <span key={s.n} className={`stg ${stage === s.n ? "on" : ""}`}>{s.label}</span>
+                <span key={s.n} className={`stg ${snap.stage === s.n ? "on" : ""}`}>{s.label}</span>
               ))}
             </div>
-            <div className="procline">iteration {iteration === "–" && budget ? `– of ${budget.max_iterations}` : iteration}</div>
-            <div className="procline">{decision}</div>
+            <div className="procline">iteration {snap.iteration === "–" && budget ? `– of ${budget.max_iterations}` : snap.iteration}</div>
+            <div className="procline">{snap.decision}</div>
           </div>
           <div className="card">
             <div className="k2">token &amp; cost budget</div>
             <div className="gauge"><i className={pct > 80 ? "hot" : ""} style={{ width: `${pct}%` }} /></div>
             <div className="procline">
-              ${spend.usd.toFixed(2)} of ${spend.ceiling.toFixed(2)} ceiling · {spend.tokens.toLocaleString()} tokens · engine hard-stops at 100%
+              ${snap.spend.usd.toFixed(2)} of ${snap.spend.ceiling.toFixed(2)} ceiling · {snap.spend.tokens.toLocaleString()} tokens · engine hard-stops at 100%
             </div>
+            <div className="budgetedit">
+              <label>ceiling $<input type="number" min="0.5" step="0.5" value={ceilingText} onChange={(e) => setCeilingText(e.target.value)} /></label>
+              <label>iterations <input type="number" min="1" step="1" value={itersText} onChange={(e) => setItersText(e.target.value)} /></label>
+              <button className="btn" onClick={() => void applyBudget()} disabled={running} title={running ? "stops are locked while a run is live" : "write the new limits into the tree"}>
+                apply
+              </button>
+            </div>
+            {budgetMsg && <div className="procline">{budgetMsg}</div>}
           </div>
         </div>
       </div>
@@ -285,5 +213,61 @@ export function Telemetry({
         )}
       </div>
     </>
+  );
+}
+
+const PALETTE = ["var(--swarm)", "var(--loop)", "var(--harness)", "var(--stop)"];
+
+function TokenChart({ ticks }: { ticks: TickRecord[] }) {
+  if (ticks.length === 0) return <div className="empty">no data yet</div>;
+  const H = 120;
+  const BAR = 34;
+  const GAP = 14;
+  const W = ticks.length * (BAR + GAP) + GAP;
+  const totals = ticks.map((t) => Math.max(t.spend_delta.tokens, t.swarm_tasks.reduce((s, x) => s + x.tokens, 0), 1));
+  const max = Math.max(...totals);
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H + 34}`} width={W} height={H + 34} role="img" aria-label="tokens per task per tick">
+        {ticks.map((t, i) => {
+          const x = GAP + i * (BAR + GAP);
+          const taskTokens = t.swarm_tasks.reduce((s, task) => s + task.tokens, 0);
+          const total = totals[i];
+          const scale = (v: number) => (v / max) * (H - 14);
+          let y = H;
+          const segments =
+            t.swarm_tasks.length > 0
+              ? [
+                  ...t.swarm_tasks.map((task, j) => ({
+                    label: `${task.task_id}${task.ok ? "" : " (failed)"}`,
+                    tokens: task.tokens,
+                    color: task.ok ? PALETTE[j % PALETTE.length] : "var(--stop)",
+                  })),
+                  ...(t.spend_delta.tokens > taskTokens
+                    ? [{ label: "orchestrator", tokens: t.spend_delta.tokens - taskTokens, color: "var(--ink-faint)" }]
+                    : []),
+                ]
+              : [{ label: "agent", tokens: t.spend_delta.tokens, color: "var(--swarm)" }];
+          return (
+            <g key={t.tick}>
+              {segments.map((seg, j) => {
+                const h = Math.max(2, scale(seg.tokens));
+                y -= h;
+                return (
+                  <rect key={j} x={x} y={y} width={BAR} height={h} rx={2} fill={seg.color}>
+                    <title>{`tick ${t.tick} · ${seg.label}: ${seg.tokens.toLocaleString()} tokens`}</title>
+                  </rect>
+                );
+              })}
+              <text x={x + BAR / 2} y={H + 14} textAnchor="middle" className="chartlabel">#{t.tick}</text>
+              <text x={x + BAR / 2} y={H + 28} textAnchor="middle" className="chartlabel dim">
+                {total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }

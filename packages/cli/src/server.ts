@@ -8,11 +8,11 @@ import { FileStore, openMemoryStore } from "@arbor/store";
 import {
   EventBus,
   LlmPlanner,
-  MODEL_TIERS,
   ScriptedAgent,
   SdkAgent,
   compileLabels,
   curate,
+  resolveModels,
   runLoop,
   suggestNodeText,
   type ArborEvent,
@@ -90,13 +90,13 @@ export function createArborServer(projectDir: string): ArborServer {
     if (!files.hasTree()) return { ok: false, error: "no tree planted — save one from the canvas or run `arbor plant`" };
 
     const mode = body.mode ?? "mock";
-    const model = body.model ?? MODEL_TIERS.premium;
-    const executor = mode === "mock" ? new ScriptedAgent([], 0.25) : new SdkAgent(model);
+    const models = resolveModels(files.readTree(), body.model);
+    const executor = mode === "mock" ? new ScriptedAgent([], 0.25) : new SdkAgent(models.execute);
     const swarm: SwarmOptions | undefined =
       mode === "swarm"
         ? {
-            planner: new LlmPlanner(model),
-            makeWorker: () => new SdkAgent(MODEL_TIERS.cheap),
+            planner: new LlmPlanner(models.plan),
+            makeWorker: () => new SdkAgent(models.execute),
             maxParallel: Math.max(1, body.workers ?? 3),
           }
         : undefined;

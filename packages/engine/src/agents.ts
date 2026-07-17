@@ -20,6 +20,33 @@ export const MODEL_TIERS = {
   cheap: "claude-haiku-4-5",
 } as const;
 
+export interface ResolvedModels {
+  /** Orchestrator / label compiler / node writer — the controller. */
+  plan: string;
+  /** Sequential agent and swarm workers — the implementer. */
+  execute: string;
+}
+
+/**
+ * Model tiers are tree configuration, not code: the orchestrator node's
+ * config.model plans, the worker node's config.model implements. An explicit
+ * override (CLI --model / API body) wins over both; hardcoded tiers are the
+ * last resort.
+ */
+export function resolveModels(
+  tree: { nodes: Array<{ type: string; config: Record<string, unknown> }> },
+  override?: string,
+): ResolvedModels {
+  const configModel = (type: string): string | undefined => {
+    const value = tree.nodes.find((n) => n.type === type)?.config?.model;
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  };
+  return {
+    plan: override ?? configModel("orchestrator") ?? MODEL_TIERS.premium,
+    execute: override ?? configModel("worker") ?? MODEL_TIERS.premium,
+  };
+}
+
 /**
  * Real executor: one Claude Agent SDK session per tick, sandboxed to the
  * working directory. The SDK supplies the harness (Read/Write/Edit/Bash/...);

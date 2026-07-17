@@ -58,7 +58,13 @@ export function App() {
           />
         )}
         {tab === "canvas" && <Canvas />}
-        {tab === "run" && <Telemetry running={running} budget={status?.budget ?? null} />}
+        {tab === "run" && (
+          <Telemetry
+            running={running}
+            budget={status?.budget ?? null}
+            onBudgetChanged={() => void api.status().then(setStatus).catch(() => undefined)}
+          />
+        )}
         {tab === "library" && <Library />}
       </div>
     </>

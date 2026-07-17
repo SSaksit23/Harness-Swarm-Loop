@@ -23,16 +23,34 @@ export function defaultTree(labels: MissionLabels): ArborTree {
     { id: "skills", type: "skills", layer: "harness", label: "skills", parent: "harness", config: {} },
 
     { id: "swarm", type: "swarm", layer: "swarm", label: "SWARM", parent: "root", config: { width_hint: labels.width_hint } },
+    // Model tiers follow the control architecture: the strongest controller
+    // plans and reviews, the implementation model writes the hard parts, and
+    // a review model is reserved for LLM-assisted verification. All editable
+    // per node (config.model) from the canvas.
     {
       id: "orchestrator",
       type: "orchestrator",
       layer: "swarm",
       label: "orchestrator",
       parent: "swarm",
-      config: { model_tier: "premium" },
+      config: { model: "claude-opus-4-8", role: "plans, decides, controls, reviews" },
     },
-    { id: "worker", type: "worker", layer: "swarm", label: "worker", parent: "swarm", config: { model_tier: "cheap" } },
-    { id: "verifier", type: "verifier", layer: "swarm", label: "verifier", parent: "swarm", config: { on_fail: "requeue" } },
+    {
+      id: "worker",
+      type: "worker",
+      layer: "swarm",
+      label: "worker",
+      parent: "swarm",
+      config: { model: "claude-fable-5", role: "implements the hard parts (code, algorithms)" },
+    },
+    {
+      id: "verifier",
+      type: "verifier",
+      layer: "swarm",
+      label: "verifier",
+      parent: "swarm",
+      config: { on_fail: "requeue", review_model: "claude-sonnet-5", role: "command checks gate; review_model reserved for LLM-assisted E2E review" },
+    },
 
     { id: "loop", type: "loop", layer: "loop", label: "LOOP", parent: "root", config: {} },
     {

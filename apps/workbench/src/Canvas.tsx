@@ -1,6 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ArborTree, Layer, NodeType, TreeEdge, TreeNode, Violation } from "@arbor/schema";
-import { api, type AttachmentInfo } from "./api.js";
+import { api, subscribeEvents, type AttachmentInfo } from "./api.js";
+
+/** A node counts as "filled" once it carries content beyond its position. */
+function nodeIsFilled(node: TreeNode): boolean {
+  return Object.keys(node.config).some((k) => k !== "pos");
+}
+
+/** Which node types light up during each tick stage (for the live flow). */
+const STAGE_TYPES: Record<number, NodeType[]> = {
+  1: ["harness", "brief", "memory", "skills"],
+  2: ["swarm", "orchestrator"],
+  3: ["worker"],
+  4: ["verifier"],
+  5: ["loop", "contract", "hard_stops", "human_gate"],
+  6: ["memory"],
+};
 
 const VB = { w: 760, h: 560 };
 const H = 44;
@@ -181,6 +196,9 @@ export function Canvas() {
   const [newLayer, setNewLayer] = useState<Layer>("harness");
   const [tempLine, setTempLine] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [liveStage, setLiveStage] = useState(0);
+  const [runLive, setRunLive] = useState(false);
+  const [filling, setFilling] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<
     | { kind: "move"; id: string; dx: number; dy: number; moved: boolean }
@@ -213,6 +231,58 @@ export function Canvas() {
       .catch((e: Error) => setError(e.message));
   }, []);
   useEffect(load, [load]);
+
+  // Live flow: light nodes/edges up as the tick moves through the layers.
+  useEffect(
+    () =>
+      subscribeEvents((e) => {
+        if (e.type === "stage") setLiveStage(e.n);
+        if (e.type === "run_state") {
+          setRunLive(e.running);
+          if (!e.running) setLiveStage(0);
+        }
+      }),
+    [],
+  );
+
+  const fillAllWithAi = async () => {
+    if (!tree || filling) return;
+    const targets = tree.nodes.filter((n) => n.type !== "mission" && !nodeIsFilled(n));
+    if (targets.length === 0) {
+      setSavedNote("every node already has content ✓");
+      return;
+    }
+    setError(null);
+    let done = 0;
+    for (const node of targets) {
+      setFilling(`${node.label} (${done + 1}/${targets.length})`);
+      try {
+        const { text } = await api.suggest(node.id);
+        mutate(
+          (draft) => {
+            const n = draft.nodes.find((m) => m.id === node.id)!;
+            n.config = { ...n.config, notes: text };
+          },
+          { undoable: done === 0 }, // one undo entry for the whole fill pass
+        );
+        done++;
+      } catch (e) {
+        setError(`${node.label}: ${(e as Error).message}`);
+        break;
+      }
+    }
+    setFilling(null);
+    if (done > 0) {
+      try {
+        const res = await api.saveTree(treeRef.current!);
+        setViolations(res.violations);
+        setDirty(false);
+        setSavedNote(`AI filled ${done} node${done === 1 ? "" : "s"} ✓ (saved)`);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    }
+  };
 
   const positions = useMemo(() => {
     if (!tree) return new Map<string, Pos>();
@@ -424,6 +494,14 @@ export function Canvas() {
         <button className="btn" onClick={() => addNode(null)}>+ node</button>
         <button className="btn" onClick={() => addNode(selectedNode?.id ?? "root")}>+ sub-node</button>
         <button className="btn warn" onClick={deleteSelected}>delete selected</button>
+        <button
+          className="btn primary"
+          onClick={() => void fillAllWithAi()}
+          disabled={filling !== null}
+          title="the AI drafts content for every node that has none yet (the mission root stays untouched — it comes from plant)"
+        >
+          {filling ? `✎ filling ${filling}…` : "✎ AI fill empty nodes"}
+        </button>
         <button className="btn" onClick={undo} title="Ctrl+Z">↩ undo</button>
         <button className="btn" onClick={redo} title="Ctrl+Y / Ctrl+Shift+Z">↪ redo</button>
         <button
@@ -469,9 +547,11 @@ export function Canvas() {
               const d = edgePath(pa, pb);
               const cls = edge.kind === "gate" ? "edge-gate" : edge.kind === "mem" ? "edge-mem" : "edge";
               const sel = selection?.kind === "edge" && selection.index === i;
+              // task flowing into this stage's nodes → animate the edge
+              const flowing = runLive && (STAGE_TYPES[liveStage] ?? []).includes(b.type);
               return (
                 <g key={`e-${i}`}>
-                  <path className={`${cls}${sel ? " sel" : ""}`} d={d} />
+                  <path className={`${cls}${sel ? " sel" : ""}${flowing ? " flow" : ""}`} d={d} />
                   <path
                     className="edge-hit"
                     d={d}
@@ -488,13 +568,14 @@ export function Canvas() {
               const pos = positions.get(node.id)!;
               const w = nodeWidth(node);
               const active = selection?.kind === "node" && selection.id === node.id;
+              const live = runLive && (STAGE_TYPES[liveStage] ?? []).includes(node.type);
               return (
                 <g
                   key={node.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${node.label} (${node.type} node)`}
-                  className={`node${active ? " active" : ""}${dropTarget === node.id ? " droptarget" : ""}`}
+                  aria-label={`${node.label} (${node.type} node)${nodeIsFilled(node) ? " — filled" : ""}`}
+                  className={`node${active ? " active" : ""}${dropTarget === node.id ? " droptarget" : ""}${live ? " live" : ""}`}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
@@ -512,6 +593,13 @@ export function Canvas() {
                   <rect x={pos.x + 6} y={pos.y - H / 2 + 6} width={4} height={H - 12} rx={1.5} fill={node.type === "verifier" || node.type === "hard_stops" ? "var(--stop)" : LAYER_COLOR[node.layer]} />
                   <text className="nlabel" x={pos.x + 17} y={pos.y - 1}>{node.label}</text>
                   <text className="nsub" x={pos.x + 17} y={pos.y + 13}>{node.type}</text>
+                  {nodeIsFilled(node) && (
+                    <g className="filledbadge">
+                      <circle cx={pos.x + w - 11} cy={pos.y - H / 2 + 11} r={7} />
+                      <text x={pos.x + w - 11} y={pos.y - H / 2 + 14.5} textAnchor="middle">✓</text>
+                      <title>this node has content (config / notes)</title>
+                    </g>
+                  )}
                   <circle
                     className="port"
                     cx={pos.x + w}

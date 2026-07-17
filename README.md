@@ -40,6 +40,27 @@ Memory tier: SQLite by default (`arbor/index.db`, zero setup). Set `ARBOR_MONGOD
 (and optionally `ARBOR_MONGODB_DB`) to move the memory index to MongoDB — the files
 under `arbor/` remain the source of truth either way.
 
+## Model tiers — the control architecture
+
+Model choice is **tree configuration, not code**. The default tree seeds a
+three-role control architecture; edit any node's `config.model` from the
+canvas, or override everything with `arbor run --model <id>`:
+
+| role | where | default |
+| --- | --- | --- |
+| 🧠 plan / decide / control / review | `orchestrator` node `config.model` | `claude-opus-4-8` |
+| ⚡ implement the hard parts | `worker` node `config.model` | `claude-fable-5` |
+| 🔍 E2E review (reserved) | `verifier` node `config.review_model` | `claude-sonnet-5` |
+
+The planner, label compiler, and node writer run on the **plan** model; the
+sequential agent and every swarm worker run on the **execute** model. The
+verifier itself stays command-based (exit codes, not opinions) — its
+`review_model` is reserved for future LLM-assisted verification.
+
+> Built with [Claude Code](https://claude.com/claude-code) — every feature ran
+> a research → design → implement → verify-in-the-browser → fix cycle, gated by
+> `tsc` + the offline test suite + the production build before landing.
+
 ## Control invariants
 
 The engine refuses to start a run unless all four hold:

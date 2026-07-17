@@ -12,6 +12,7 @@ import {
   LlmPlanner,
   MODEL_TIERS,
   ScriptedAgent,
+  resolveModels,
   SdkAgent,
   compileLabels,
   curate,
@@ -176,14 +177,15 @@ program
   .command("run")
   .description("run the loop: load context → execute → verify → decide → crystallize")
   .option("--mock", "use a no-op scripted agent (exercises the hard stops, no API calls)", false)
-  .option("--model <id>", "model for the sequential agent / orchestrator", MODEL_TIERS.premium)
-  .option("--swarm", "enable the swarm layer: orchestrator plans, workers fan out on the cheap tier", false)
+  .option("--model <id>", "override every model (default: read tiers from the tree's orchestrator/worker node configs)")
+  .option("--swarm", "enable the swarm layer: orchestrator plans, workers execute in parallel", false)
   .option("--workers <n>", "max parallel workers in swarm mode", "3")
   .option("--no-sandbox", "run in place instead of a git worktree")
-  .action(async (opts: { mock: boolean; model: string; swarm: boolean; workers: string; sandbox: boolean }) => {
+  .action(async (opts: { mock: boolean; model?: string; swarm: boolean; workers: string; sandbox: boolean }) => {
     const dir = path.resolve(program.opts().dir);
     const { files, memory } = await stores(dir);
     const tree = files.readTree();
+    const models = resolveModels(tree, opts.model);
 
     const events = new EventBus();
     events.on(renderEvent);
@@ -195,11 +197,11 @@ program
       return;
     }
 
-    const executor = opts.mock ? new ScriptedAgent([], 0.25) : new SdkAgent(opts.model);
+    const executor = opts.mock ? new ScriptedAgent([], 0.25) : new SdkAgent(models.execute);
     const swarm: SwarmOptions | undefined = opts.swarm
       ? {
-          planner: new LlmPlanner(opts.model),
-          makeWorker: () => new SdkAgent(MODEL_TIERS.cheap),
+          planner: new LlmPlanner(models.plan),
+          makeWorker: () => new SdkAgent(models.execute),
           maxParallel: Math.max(1, Number(opts.workers) || 3),
         }
       : undefined;
@@ -207,7 +209,7 @@ program
     console.log(pc.bold(`goal: ${tree.labels.goal}`));
     console.log(
       pc.dim(
-        `agent: ${executor.name}${opts.mock ? " (mock)" : ` (${opts.model})`}${swarm ? ` · swarm: ${opts.model} plans, ${MODEL_TIERS.cheap} executes (≤${swarm.maxParallel} parallel)` : ""} · budget: ${tree.labels.budget.max_iterations} iters / $${tree.labels.budget.cost_ceiling_usd} / no-progress ${tree.labels.budget.no_progress_window}\n`,
+        `agent: ${executor.name}${opts.mock ? " (mock)" : ` (${models.execute})`}${swarm ? ` · swarm: ${models.plan} plans, ${models.execute} executes (≤${swarm.maxParallel} parallel)` : ""} · budget: ${tree.labels.budget.max_iterations} iters / $${tree.labels.budget.cost_ceiling_usd} / no-progress ${tree.labels.budget.no_progress_window}\n`,
       ),
     );
 
@@ -251,8 +253,8 @@ program
   .description("cron-style trigger: re-check the metric on an interval and run the loop only when it fails")
   .option("--every <minutes>", "minutes between checks", "30")
   .option("--mock", "use the no-op scripted agent", false)
-  .option("--model <id>", "model for the real agent", MODEL_TIERS.premium)
-  .action(async (opts: { every: string; mock: boolean; model: string }) => {
+  .option("--model <id>", "override the model (default: from the tree's worker node config)")
+  .action(async (opts: { every: string; mock: boolean; model?: string }) => {
     const dir = path.resolve(program.opts().dir);
     const { files, memory } = await stores(dir);
     const intervalMs = Math.max(1, Number(opts.every) || 30) * 60_000;
@@ -267,7 +269,7 @@ program
           console.log(pc.yellow(`${new Date().toLocaleTimeString()} verifier failing — engaging the loop`));
           const events = new EventBus();
           events.on(renderEvent);
-          const executor = opts.mock ? new ScriptedAgent([], 0.25) : new SdkAgent(opts.model);
+          const executor = opts.mock ? new ScriptedAgent([], 0.25) : new SdkAgent(resolveModels(tree, opts.model).execute);
           await runLoop({ projectDir: dir, tree, files, memory, executor, events });
         }
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
