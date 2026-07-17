@@ -20,9 +20,10 @@ The full design spec lives in [docs/design.html](docs/design.html).
 npm install
 npm test                      # unit + e2e (offline, mock agent)
 
-# Real run against a repo (needs ANTHROPIC_API_KEY):
+# Real run against a repo (needs ANTHROPIC_API_KEY — .env is auto-loaded):
 npm run arbor -- init   -C path/to/repo
-npm run arbor -- plant  -C path/to/repo "make the test suite green, stop at $5"
+npm run arbor -- plant  -C path/to/repo 'make the test suite green, stop at $5'
+# ^ use SINGLE quotes in PowerShell/bash — double quotes make the shell expand `$5`
 npm run arbor -- run    -C path/to/repo            # add --swarm for orchestrator + parallel workers
 npm run arbor -- watch  -C path/to/repo --every 30 # cron-style: re-check the metric, loop only on failure
 
