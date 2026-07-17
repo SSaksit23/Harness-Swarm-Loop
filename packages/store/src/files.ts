@@ -21,6 +21,11 @@ export interface Attachment {
   content: string;
 }
 
+/** A mounted skill: flat .md (written by curation) or an installed package folder. */
+export interface SkillEntry extends MemoryEntryFile {
+  kind: "md" | "package";
+}
+
 export const MAX_ATTACHMENT_BYTES = 262_144; // 256KB — attachments are reference text, not blobs
 
 function safeSegment(raw: string): string {
@@ -200,13 +205,77 @@ export class FileStore {
     return this.writeEntry(this.skillsDir, entry);
   }
 
-  listSkills(): MemoryEntryFile[] {
-    return this.listEntries(this.skillsDir);
+  /**
+   * Flat .md skills (curation output) plus installed skill packages — folders
+   * containing a SKILL.md, same convention as Claude's Agent Skills.
+   */
+  listSkills(): SkillEntry[] {
+    const flat: SkillEntry[] = this.listEntries(this.skillsDir).map((e) => ({ ...e, kind: "md" as const }));
+    const packages: SkillEntry[] = [];
+    if (fs.existsSync(this.skillsDir)) {
+      for (const dirent of fs.readdirSync(this.skillsDir, { withFileTypes: true })) {
+        if (!dirent.isDirectory()) continue;
+        const skillMd = path.join(this.skillsDir, dirent.name, "SKILL.md");
+        if (!fs.existsSync(skillMd)) continue;
+        const raw = fs.readFileSync(skillMd, "utf8");
+        // tolerant frontmatter: Claude packages carry name/description; both optional
+        const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+        let description = "";
+        let body = raw;
+        if (m) {
+          body = m[2].trim();
+          const kv = Object.fromEntries(
+            m[1]
+              .split(/\r?\n/)
+              .map((line) => {
+                const i = line.indexOf(":");
+                return i === -1 ? null : [line.slice(0, i).trim(), line.slice(i + 1).trim()];
+              })
+              .filter((x): x is [string, string] => x !== null),
+          );
+          description = kv.description ?? "";
+        }
+        packages.push({
+          name: dirent.name,
+          text: description ? `${description}\n\n${body}` : body,
+          tags: ["package"],
+          source_tick: null,
+          created_at: fs.statSync(skillMd).mtime.toISOString(),
+          kind: "package",
+        });
+      }
+    }
+    return [...flat, ...packages].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   hasSkill(name: string): boolean {
     const safe = name.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-    return fs.existsSync(path.join(this.skillsDir, `${safe}.md`));
+    return fs.existsSync(path.join(this.skillsDir, `${safe}.md`)) || fs.existsSync(path.join(this.skillsDir, safe, "SKILL.md"));
+  }
+
+  /**
+   * Install a skill package (Claude Agent Skills convention): a folder of
+   * files under arbor/skills/<slug>/ that must include SKILL.md. Every path
+   * segment is sanitized; binary resources are allowed, SKILL.md must be text.
+   */
+  installSkillPackage(slug: string, entries: Array<{ path: string; data: Uint8Array }>): SkillEntry {
+    const safeSlug = safeSegment(slug).replace(/\.[^.]*$/, "").toLowerCase() || "skill";
+    if (!entries.some((e) => e.path.split(/[\\/]/).pop()?.toLowerCase() === "skill.md")) {
+      throw new Error("a skill package must contain SKILL.md");
+    }
+    const root = path.join(this.skillsDir, safeSlug);
+    fs.rmSync(root, { recursive: true, force: true }); // reinstall replaces
+    for (const entry of entries) {
+      const segments = entry.path.split(/[\\/]/).filter(Boolean).map(safeSegment);
+      if (!segments.length) continue;
+      const target = path.resolve(root, ...segments);
+      if (!target.startsWith(path.resolve(root))) throw new Error("invalid path in skill package");
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, entry.data);
+    }
+    const installed = this.listSkills().find((s) => s.kind === "package" && s.name === safeSlug);
+    if (!installed) throw new Error("skill package install failed");
+    return installed;
   }
 
   private writeEntry(dir: string, entry: Omit<MemoryEntryFile, "created_at">): MemoryEntryFile {

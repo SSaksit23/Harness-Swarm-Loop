@@ -332,7 +332,26 @@ program
     }
   });
 
-const skillsCmd = program.command("skills").description("inspect promoted skills");
+const skillsCmd = program.command("skills").description("inspect and install skills");
+skillsCmd
+  .command("install <files...>")
+  .description("install skills from .zip packages (Claude skill format: SKILL.md inside), .pdf (text extracted), or .md/.txt")
+  .action(async (filePaths: string[]) => {
+    const dir = path.resolve(program.opts().dir);
+    const files = new FileStore(dir);
+    files.init();
+    const { installSkill } = await import("./install.js");
+    for (const filePath of filePaths) {
+      try {
+        const buffer = fs.readFileSync(path.resolve(filePath));
+        const result = await installSkill(files, path.basename(filePath), new Uint8Array(buffer));
+        console.log(pc.green(`installed ${result.name} (${result.kind}${result.kind === "package" ? `, ${result.files} files` : ""})`));
+      } catch (err) {
+        console.error(pc.red(`${filePath}: ${err instanceof Error ? err.message : String(err)}`));
+        process.exitCode = 1;
+      }
+    }
+  });
 skillsCmd
   .command("ls")
   .description("list skills")

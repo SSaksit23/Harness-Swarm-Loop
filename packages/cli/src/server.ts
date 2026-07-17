@@ -191,6 +191,26 @@ export function createArborServer(projectDir: string): ArborServer {
       if (url.pathname === "/api/skills" && req.method === "GET") {
         return json(res, 200, files.listSkills());
       }
+      if (url.pathname === "/api/skills/install" && req.method === "POST") {
+        const body = (await readBody(req)) as { filename?: string; data_base64?: string };
+        if (!body.filename || !body.data_base64) {
+          return json(res, 400, { error: "filename and data_base64 are required" });
+        }
+        let buffer: Buffer;
+        try {
+          buffer = Buffer.from(body.data_base64, "base64");
+        } catch {
+          return json(res, 400, { error: "data_base64 is not valid base64" });
+        }
+        if (buffer.length > 16 * 1024 * 1024) return json(res, 400, { error: "upload exceeds the 16MB cap" });
+        try {
+          const { installSkill } = await import("./install.js");
+          const result = await installSkill(files, body.filename, buffer);
+          return json(res, 200, { ok: true, ...result });
+        } catch (err) {
+          return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
       if (url.pathname === "/api/curate" && req.method === "POST") {
         const body = (await readBody(req)) as { prune?: boolean; minUsage?: number };
         const memory = await openMemoryStore(files, path.basename(projectDir));

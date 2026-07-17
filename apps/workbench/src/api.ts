@@ -81,7 +81,13 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ nodeId }),
     }),
-  skills: () => jsonFetch<Array<Omit<MemoryEntry, "usage_count" | "last_used">>>("/api/skills"),
+  skills: () => jsonFetch<SkillInfo[]>("/api/skills"),
+  installSkill: (filename: string, dataBase64: string) =>
+    jsonFetch<{ ok: boolean; name: string; kind: "md" | "package"; files: number }>("/api/skills/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename, data_base64: dataBase64 }),
+    }),
   attachments: (nodeId: string) => jsonFetch<AttachmentInfo[]>(`/api/nodes/${encodeURIComponent(nodeId)}/attachments`),
   uploadAttachment: (nodeId: string, filename: string, content: string) =>
     jsonFetch<{ ok: boolean; name: string; size: number }>(`/api/nodes/${encodeURIComponent(nodeId)}/attachments`, {
@@ -100,6 +106,26 @@ export const api = {
       body: JSON.stringify({ prune }),
     }),
 };
+
+export interface SkillInfo {
+  name: string;
+  text: string;
+  tags: string[];
+  source_tick: number | null;
+  created_at: string;
+  kind: "md" | "package";
+}
+
+/** File -> base64 without blowing the stack on large buffers. */
+export async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
 
 export interface AttachmentInfo {
   name: string;

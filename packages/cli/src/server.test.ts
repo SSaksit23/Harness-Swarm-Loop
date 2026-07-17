@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { MissionLabelsSchema, defaultTree } from "@arbor/schema";
+import { MissionLabelsSchema, buildZip, defaultTree } from "@arbor/schema";
 import { FileStore } from "@arbor/store";
 import { createArborServer, type ArborServer } from "./server.js";
 
@@ -193,6 +193,31 @@ describe("arbor serve", () => {
     expect((await fetch(`${base}/api/nodes/brief/attachments/imported-notes.md`, { method: "DELETE" })).status).toBe(200);
     expect((await (await fetch(`${base}/api/nodes/brief/attachments`)).json()) as unknown[]).toHaveLength(0);
     expect((await fetch(`${base}/api/nodes/brief/attachments/imported-notes.md`, { method: "DELETE" })).status).toBe(404);
+  });
+
+  it("installs a skill package zip over the API", async () => {
+    const zipBytes = buildZip([
+      { path: "review/SKILL.md", content: "---\nname: review\ndescription: Review checklists.\n---\n\nAlways run the suite twice." },
+      { path: "review/checklist.md", content: "- clocks pinned" },
+    ]);
+    const res = await fetch(`${base}/api/skills/install`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: "review.zip", data_base64: Buffer.from(zipBytes).toString("base64") }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as object).toMatchObject({ ok: true, name: "review", kind: "package" });
+
+    const skills = (await (await fetch(`${base}/api/skills`)).json()) as Array<{ name: string; kind: string }>;
+    expect(skills.find((s) => s.name === "review")).toMatchObject({ kind: "package" });
+
+    // garbage upload -> 400 with a real message
+    const bad = await fetch(`${base}/api/skills/install`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: "junk.zip", data_base64: Buffer.from("not a zip").toString("base64") }),
+    });
+    expect(bad.status).toBe(400);
   });
 
   it("drafts node content via the node writer (fixture)", async () => {
