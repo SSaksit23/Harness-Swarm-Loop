@@ -9,7 +9,7 @@ import {
   type TaskSpec,
   type TickRecord,
 } from "@arbor/schema";
-import type { FileStore, MemoryStore } from "@arbor/store";
+import type { Attachment, FileStore, MemoryStore } from "@arbor/store";
 import type { AgentExecutor } from "./agents.js";
 import { EventBus, type CheckinAction, type CheckinReport, type HumanGate } from "./events.js";
 import { runChecks, type VerifierResult } from "./verifier.js";
@@ -63,12 +63,36 @@ function criteriaFor(tree: ArborTree): SuccessCriterion[] {
   return fromBrief.length ? fromBrief : criteriaFromLabels(tree.labels);
 }
 
+const ATTACH_FILE_CAP = 4096;
+const ATTACH_TOTAL_CAP = 16384;
+
+/** Capped blocks of uploaded reference files, labelled by owning node. */
+export function attachmentBlocks(tree: ArborTree, byNode: Map<string, Attachment[]>): string[] {
+  const blocks: string[] = [];
+  let total = 0;
+  for (const [nodeId, list] of byNode) {
+    const label = tree.nodes.find((n) => n.id === nodeId)?.label ?? nodeId;
+    for (const a of list) {
+      if (total >= ATTACH_TOTAL_CAP) {
+        blocks.push("(further attachments omitted — total size cap reached)");
+        return blocks;
+      }
+      let body = a.content.slice(0, ATTACH_FILE_CAP);
+      if (a.content.length > ATTACH_FILE_CAP) body += "\n…(truncated)";
+      total += body.length;
+      blocks.push(`### ${label}/${a.name}\n${body}`);
+    }
+  }
+  return blocks;
+}
+
 function buildPrompt(
   tree: ArborTree,
   recalled: string[],
   lastFailure: VerifierResult | null,
   guidance: string[] = [],
   skills: string[] = [],
+  attachments: string[] = [],
 ): string {
   const { labels } = tree;
   const parts: string[] = [
@@ -94,6 +118,9 @@ function buildPrompt(
   }
   if (skills.length) {
     parts.push(``, `## Skills (proven procedures from past runs — apply when relevant)`, ...skills.map((s) => `- ${s}`));
+  }
+  if (attachments.length) {
+    parts.push(``, `## Uploaded reference material (files the user attached to tree nodes)`, ...attachments);
   }
   if (lastFailure) {
     parts.push(
@@ -193,11 +220,13 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
     const recalledHits = await memory.recall(tree.labels.goal, 5);
     const recalled = recalledHits.map((h) => `${h.name}: ${h.text}`);
     const skills = files.listSkills().slice(0, 5).map((s) => `${s.name}: ${s.text.slice(0, 400)}`);
+    const attachmentsMap = files.attachmentsByNode();
+    const attachments = attachmentBlocks(tree, attachmentsMap);
     events.emit({
       type: "thought",
       owner: "harness",
       layer: "harness",
-      text: `brief loaded; ${recalledHits.length} memory entr${recalledHits.length === 1 ? "y" : "ies"} recalled; ${skills.length} skill${skills.length === 1 ? "" : "s"} mounted`,
+      text: `brief loaded; ${recalledHits.length} memory entr${recalledHits.length === 1 ? "y" : "ies"} recalled; ${skills.length} skill${skills.length === 1 ? "" : "s"} mounted; ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}`,
     });
 
     // T2 — plan: ceiling test decides wide (swarm fan-out) vs sequential.
@@ -212,7 +241,14 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
         {
           goal: tree.labels.goal,
           criteria,
-          context: [...tree.labels.context, ...guidance, ...skills.map((s) => `skill: ${s}`)],
+          context: [
+            ...tree.labels.context,
+            ...guidance,
+            ...skills.map((s) => `skill: ${s}`),
+            ...[...attachmentsMap.entries()].flatMap(([nodeId, list]) =>
+              list.map((a) => `attachment on ${nodeId}: ${a.name} (${a.size} bytes)`),
+            ),
+          ],
           outOfScope: tree.labels.out_of_scope,
           recalled,
           lastFailureSummary: lastFailure
@@ -264,7 +300,7 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
       agentResult = { summary: wide.summary, costUsd: wide.costUsd, tokens: wide.tokens };
     } else {
       events.emit({ type: "status", agent: executor.name, state: "running", task: tree.labels.goal });
-      const prompt = buildPrompt(tree, recalled, lastFailure, guidance, skills);
+      const prompt = buildPrompt(tree, recalled, lastFailure, guidance, skills, attachments);
       agentResult = await executor.execute({
         prompt,
         cwd: sandbox.dir,

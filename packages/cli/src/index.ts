@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { Command } from "commander";
@@ -298,6 +299,37 @@ program
     console.log(pc.bold(`memory entries: `) + String(await memory.count()));
     console.log(pc.bold(`skills: `) + String(files.listSkills().length));
     await memory.close();
+  });
+
+program
+  .command("attach <node-id> [files...]")
+  .description("attach text files (e.g. an .md from another project) to a tree node; agents and the AI writer read them")
+  .option("--list", "list the node's current attachments instead of uploading", false)
+  .action((nodeId: string, filePaths: string[], opts: { list: boolean }) => {
+    const dir = path.resolve(program.opts().dir);
+    const files = new FileStore(dir);
+    files.init();
+    if (!files.hasTree() || !files.readTree().nodes.some((n) => n.id === nodeId)) {
+      console.error(pc.red(`no node with id "${nodeId}" in the planted tree — check \`arbor status\` / the canvas`));
+      process.exitCode = 1;
+      return;
+    }
+    if (opts.list || filePaths.length === 0) {
+      const list = files.listAttachments(nodeId);
+      if (!list.length) console.log(pc.dim(`no attachments on ${nodeId} — arbor attach ${nodeId} <file...>`));
+      for (const a of list) console.log(`${pc.bold(a.name)} ${pc.dim(`(${a.size} bytes)`)}`);
+      return;
+    }
+    for (const filePath of filePaths) {
+      try {
+        const content = fs.readFileSync(path.resolve(filePath), "utf8");
+        const saved = files.writeAttachment(nodeId, path.basename(filePath), content);
+        console.log(pc.green(`attached ${saved.name} (${saved.size} bytes) -> ${nodeId}`));
+      } catch (err) {
+        console.error(pc.red(`${filePath}: ${err instanceof Error ? err.message : String(err)}`));
+        process.exitCode = 1;
+      }
+    }
   });
 
 const skillsCmd = program.command("skills").description("inspect promoted skills");

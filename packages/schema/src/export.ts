@@ -5,11 +5,16 @@ export interface ExportFile {
   content: string;
 }
 
+export interface ExportAttachment {
+  name: string;
+  content: string;
+}
+
 function slug(s: string): string {
   return s.replace(/[^a-zA-Z0-9-_]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "node";
 }
 
-function nodeMarkdown(tree: ArborTree, node: TreeNode, children: TreeNode[]): string {
+function nodeMarkdown(tree: ArborTree, node: TreeNode, children: TreeNode[], attachmentNames: string[] = []): string {
   const inbound = tree.edges.filter((e) => e.to === node.id);
   const outbound = tree.edges.filter((e) => e.from === node.id);
   const lines = [
@@ -37,29 +42,38 @@ function nodeMarkdown(tree: ArborTree, node: TreeNode, children: TreeNode[]): st
     lines.push(``, `## Sub-nodes`, ``);
     for (const c of children) lines.push(`- [${c.label}](./${slug(c.label)}${tree.nodes.some((n) => n.parent === c.id) ? `/${slug(c.label)}.md` : ".md"})`);
   }
+  if (attachmentNames.length) {
+    lines.push(``, `## Attachments`, ``);
+    for (const a of attachmentNames) lines.push(`- ${a}`);
+  }
   return lines.join("\n") + "\n";
 }
 
 /**
  * Export the tree as a markdown folder structure: each node becomes a .md
- * file; nodes with sub-nodes become folders containing them. TREE.md at the
- * root gives the mission overview; tree.json makes the export re-importable.
+ * file; nodes with sub-nodes become folders containing them. Uploaded
+ * attachments (if provided, keyed by node id) travel alongside their node.
+ * TREE.md at the root gives the mission overview; tree.json makes the export
+ * re-importable.
  */
-export function treeToMarkdownFiles(tree: ArborTree): ExportFile[] {
+export function treeToMarkdownFiles(tree: ArborTree, attachments?: Map<string, ExportAttachment[]>): ExportFile[] {
   const files: ExportFile[] = [];
   const childrenOf = (id: string) => tree.nodes.filter((n) => n.parent === id);
 
-  const dirFor = new Map<string, string>(); // node id -> directory its children live in
   const emit = (node: TreeNode, parentDir: string) => {
     const children = childrenOf(node.id);
     const name = slug(node.label);
+    const attached = attachments?.get(node.id) ?? [];
+    const names = attached.map((a) => a.name);
     if (children.length) {
       const dir = parentDir ? `${parentDir}/${name}` : name;
-      dirFor.set(node.id, dir);
-      files.push({ path: `${dir}/${name}.md`, content: nodeMarkdown(tree, node, children) });
+      files.push({ path: `${dir}/${name}.md`, content: nodeMarkdown(tree, node, children, names) });
+      for (const a of attached) files.push({ path: `${dir}/attachments/${a.name}`, content: a.content });
       for (const child of children) emit(child, dir);
     } else {
-      files.push({ path: `${parentDir ? `${parentDir}/` : ""}${name}.md`, content: nodeMarkdown(tree, node, []) });
+      const prefix = parentDir ? `${parentDir}/` : "";
+      files.push({ path: `${prefix}${name}.md`, content: nodeMarkdown(tree, node, [], names) });
+      for (const a of attached) files.push({ path: `${prefix}${name}-attachments/${a.name}`, content: a.content });
     }
   };
   for (const root of tree.nodes.filter((n) => n.parent === null)) emit(root, "");

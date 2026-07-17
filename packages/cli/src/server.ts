@@ -215,9 +215,40 @@ export function createArborServer(projectDir: string): ArborServer {
         pendingCheckin.resolve({ action, note: body.note });
         return json(res, 200, { ok: true });
       }
+      // per-node attachments: GET/POST /api/nodes/:id/attachments, DELETE .../:name
+      const attachMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/attachments(?:\/([^/]+))?$/);
+      if (attachMatch) {
+        const nodeId = decodeURIComponent(attachMatch[1]);
+        const attachmentName = attachMatch[2] ? decodeURIComponent(attachMatch[2]) : null;
+        if (!files.hasTree()) return json(res, 404, { error: "no tree planted" });
+        if (!files.readTree().nodes.some((n) => n.id === nodeId)) {
+          return json(res, 404, { error: `no node with id "${nodeId}"` });
+        }
+        if (req.method === "GET" && !attachmentName) {
+          return json(res, 200, files.listAttachments(nodeId));
+        }
+        if (req.method === "POST" && !attachmentName) {
+          const body = (await readBody(req)) as { filename?: string; content?: string };
+          if (!body.filename || typeof body.content !== "string") {
+            return json(res, 400, { error: "filename and content are required" });
+          }
+          try {
+            const saved = files.writeAttachment(nodeId, body.filename, body.content);
+            return json(res, 200, { ok: true, name: saved.name, size: saved.size });
+          } catch (err) {
+            return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        if (req.method === "DELETE" && attachmentName) {
+          const removed = files.deleteAttachment(nodeId, attachmentName);
+          return json(res, removed ? 200 : 404, removed ? { ok: true } : { error: "no such attachment" });
+        }
+        return json(res, 405, { error: "method not allowed" });
+      }
+
       if (url.pathname === "/api/export.zip" && req.method === "GET") {
         if (!files.hasTree()) return json(res, 404, { error: "no tree planted" });
-        const zip = buildZip(treeToMarkdownFiles(files.readTree()));
+        const zip = buildZip(treeToMarkdownFiles(files.readTree(), files.attachmentsByNode()));
         res.writeHead(200, {
           "content-type": "application/zip",
           "content-disposition": `attachment; filename="arbor-${path.basename(projectDir)}.zip"`,
@@ -230,7 +261,10 @@ export function createArborServer(projectDir: string): ArborServer {
         const body = (await readBody(req)) as { nodeId?: string; fixture?: boolean };
         if (!body.nodeId) return json(res, 400, { error: "nodeId is required" });
         try {
-          const result = await suggestNodeText(files.readTree(), body.nodeId, { fixture: body.fixture });
+          const result = await suggestNodeText(files.readTree(), body.nodeId, {
+            fixture: body.fixture,
+            attachments: files.attachmentsByNode(),
+          });
           return json(res, 200, result);
         } catch (err) {
           return json(res, 400, { error: err instanceof Error ? err.message : String(err) });

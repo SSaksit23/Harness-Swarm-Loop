@@ -1,11 +1,16 @@
 import type { ArborTree } from "@arbor/schema";
+import type { Attachment } from "@arbor/store";
 import { MODEL_TIERS } from "./agents.js";
 
 export interface SuggestResult {
   text: string;
 }
 
-function treeContext(tree: ArborTree, targetId: string): string {
+type AttachmentMap = Map<string, Attachment[]>;
+
+const SUGGEST_ATTACH_CAP = 8192;
+
+function treeContext(tree: ArborTree, targetId: string, attachments?: AttachmentMap): string {
   const lines: string[] = [
     `## Mission labels`,
     `goal: ${tree.labels.goal}`,
@@ -22,6 +27,23 @@ function treeContext(tree: ArborTree, targetId: string): string {
   }
   lines.push(``, `## Edges (typed handoffs)`);
   for (const e of tree.edges) lines.push(`- ${e.from} -> ${e.to} (${e.kind})`);
+
+  if (attachments?.size) {
+    lines.push(``, `## Uploaded attachments`);
+    let budget = SUGGEST_ATTACH_CAP;
+    for (const [nodeId, list] of attachments) {
+      for (const a of list) {
+        if (nodeId === targetId && budget > 0) {
+          // the target node's own uploads are the richest signal — inline them
+          const body = a.content.slice(0, budget);
+          budget -= body.length;
+          lines.push(`### ${nodeId}/${a.name} (attached to the TARGET)`, body);
+        } else {
+          lines.push(`- ${nodeId}/${a.name} (${a.size} bytes)`);
+        }
+      }
+    }
+  }
   return lines.join("\n");
 }
 
@@ -35,13 +57,15 @@ function connectedIds(tree: ArborTree, targetId: string): string[] {
 }
 
 /** Deterministic draft for tests and offline demos — still cross-node aware. */
-function fixtureSuggest(tree: ArborTree, targetId: string): SuggestResult {
+function fixtureSuggest(tree: ArborTree, targetId: string, attachments?: AttachmentMap): SuggestResult {
   const node = tree.nodes.find((n) => n.id === targetId)!;
   const neighbours = connectedIds(tree, targetId);
+  const attached = attachments?.get(targetId) ?? [];
   return {
     text:
       `Purpose: "${node.label}" (${node.type}, ${node.layer} layer) serves the mission "${tree.labels.goal}". ` +
       `It exchanges data with ${neighbours.length ? neighbours.join(", ") : "no other nodes yet"}. ` +
+      (attached.length ? `Uploaded reference: ${attached.map((a) => a.name).join(", ")}. ` : "") +
       `Suggested next step: describe what this node receives, what it must emit, and which success criterion (${tree.labels.metric_scope.metric}) it helps satisfy.`,
   };
 }
@@ -55,11 +79,11 @@ function fixtureSuggest(tree: ArborTree, targetId: string): SuggestResult {
 export async function suggestNodeText(
   tree: ArborTree,
   nodeId: string,
-  opts: { fixture?: boolean } = {},
+  opts: { fixture?: boolean; attachments?: AttachmentMap } = {},
 ): Promise<SuggestResult> {
   const node = tree.nodes.find((n) => n.id === nodeId);
   if (!node) throw new Error(`no node with id "${nodeId}"`);
-  if (opts.fixture) return fixtureSuggest(tree, nodeId);
+  if (opts.fixture) return fixtureSuggest(tree, nodeId, opts.attachments);
 
   if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
     throw new Error("no Anthropic credentials — set ANTHROPIC_API_KEY to use the node writer");
@@ -76,7 +100,7 @@ export async function suggestNodeText(
     ``,
     `Keep it under 150 words, plain prose + a short config list. No preamble.`,
     ``,
-    treeContext(tree, nodeId),
+    treeContext(tree, nodeId, opts.attachments),
   ].join("\n");
 
   const response = await client.messages.create({

@@ -15,6 +15,20 @@ export interface MemoryEntryFile {
   created_at: string;
 }
 
+export interface Attachment {
+  name: string;
+  size: number;
+  content: string;
+}
+
+export const MAX_ATTACHMENT_BYTES = 262_144; // 256KB — attachments are reference text, not blobs
+
+function safeSegment(raw: string): string {
+  // basename only, safe charset, extension preserved — used for node ids and filenames alike
+  const base = path.basename(raw).replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^\.+/, "");
+  return base || "file";
+}
+
 /**
  * The source of truth: a plain `arbor/` directory inside the target project.
  * Git-versionable, diffable, human-readable. The SQLite index is a rebuildable
@@ -39,6 +53,9 @@ export class FileStore {
   get skillsDir() {
     return path.join(this.root, "skills");
   }
+  get attachmentsDir() {
+    return path.join(this.root, "attachments");
+  }
   get dbPath() {
     return path.join(this.root, "index.db");
   }
@@ -47,7 +64,7 @@ export class FileStore {
   }
 
   init(): void {
-    for (const dir of [this.treeDir, this.ticksDir, this.memoryDir, this.skillsDir]) {
+    for (const dir of [this.treeDir, this.ticksDir, this.memoryDir, this.skillsDir, this.attachmentsDir]) {
       fs.mkdirSync(dir, { recursive: true });
     }
     // The index DB is a projection — keep it out of the target repo's history.
@@ -108,6 +125,68 @@ export class FileStore {
     if (!fs.existsSync(file)) return false;
     fs.rmSync(file);
     return true;
+  }
+
+  /* ---------------- per-node attachments (uploaded reference files) ---------------- */
+
+  /**
+   * Attach a text file to a node: arbor/attachments/<node-id>/<filename>.
+   * Any text type is accepted; binary (NUL byte) and oversize content is
+   * rejected so attachments stay promptable reference material.
+   */
+  writeAttachment(nodeId: string, filename: string, content: string): Attachment {
+    if (content.includes("\u0000")) {
+      throw new Error(`"${filename}" looks like a binary file — attachments must be text`);
+    }
+    const size = Buffer.byteLength(content, "utf8");
+    if (size > MAX_ATTACHMENT_BYTES) {
+      throw new Error(`"${filename}" is ${Math.round(size / 1024)}KB — attachments are capped at ${MAX_ATTACHMENT_BYTES / 1024}KB`);
+    }
+    const dir = this.attachmentDir(nodeId);
+    fs.mkdirSync(dir, { recursive: true });
+    const name = safeSegment(filename);
+    const target = path.resolve(dir, name);
+    if (!target.startsWith(path.resolve(this.attachmentsDir))) {
+      throw new Error("invalid attachment path");
+    }
+    fs.writeFileSync(target, content);
+    return { name, size, content };
+  }
+
+  listAttachments(nodeId: string): Attachment[] {
+    const dir = this.attachmentDir(nodeId);
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .sort()
+      .filter((f) => fs.statSync(path.join(dir, f)).isFile())
+      .map((f) => {
+        const content = fs.readFileSync(path.join(dir, f), "utf8");
+        return { name: f, size: Buffer.byteLength(content, "utf8"), content };
+      });
+  }
+
+  deleteAttachment(nodeId: string, name: string): boolean {
+    const file = path.resolve(this.attachmentDir(nodeId), safeSegment(name));
+    if (!file.startsWith(path.resolve(this.attachmentsDir)) || !fs.existsSync(file)) return false;
+    fs.rmSync(file);
+    return true;
+  }
+
+  /** Everything at once — for the export zip and prompt assembly. */
+  attachmentsByNode(): Map<string, Attachment[]> {
+    const out = new Map<string, Attachment[]>();
+    if (!fs.existsSync(this.attachmentsDir)) return out;
+    for (const nodeDir of fs.readdirSync(this.attachmentsDir).sort()) {
+      if (!fs.statSync(path.join(this.attachmentsDir, nodeDir)).isDirectory()) continue;
+      const list = this.listAttachments(nodeDir);
+      if (list.length) out.set(nodeDir, list);
+    }
+    return out;
+  }
+
+  private attachmentDir(nodeId: string): string {
+    return path.join(this.attachmentsDir, safeSegment(nodeId));
   }
 
   /** Skills: proven procedures promoted from repeated lessons. Same format as memory. */

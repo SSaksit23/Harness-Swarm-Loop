@@ -82,6 +82,17 @@ export const api = {
       body: JSON.stringify({ nodeId }),
     }),
   skills: () => jsonFetch<Array<Omit<MemoryEntry, "usage_count" | "last_used">>>("/api/skills"),
+  attachments: (nodeId: string) => jsonFetch<AttachmentInfo[]>(`/api/nodes/${encodeURIComponent(nodeId)}/attachments`),
+  uploadAttachment: (nodeId: string, filename: string, content: string) =>
+    jsonFetch<{ ok: boolean; name: string; size: number }>(`/api/nodes/${encodeURIComponent(nodeId)}/attachments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename, content }),
+    }),
+  deleteAttachment: (nodeId: string, name: string) =>
+    jsonFetch<{ ok: boolean }>(`/api/nodes/${encodeURIComponent(nodeId)}/attachments/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
   curate: (prune: boolean) =>
     jsonFetch<CurationReport>("/api/curate", {
       method: "POST",
@@ -89,6 +100,12 @@ export const api = {
       body: JSON.stringify({ prune }),
     }),
 };
+
+export interface AttachmentInfo {
+  name: string;
+  size: number;
+  content: string;
+}
 
 export interface CurationReport {
   memory_entries: number;

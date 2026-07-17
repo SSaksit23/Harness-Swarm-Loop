@@ -147,6 +147,54 @@ describe("arbor serve", () => {
     expect(text).toContain("mission/harness/brief.md");
   });
 
+  it("attachment round-trip: upload, list, export, delete", async () => {
+    await fetch(`${base}/api/tree`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(plantedTree()),
+    });
+
+    // unknown node -> 404
+    expect(
+      (
+        await fetch(`${base}/api/nodes/nope/attachments`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ filename: "x.md", content: "hi" }),
+        })
+      ).status,
+    ).toBe(404);
+
+    // binary -> 400
+    const binary = await fetch(`${base}/api/nodes/brief/attachments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: "blob.bin", content: "a" + String.fromCharCode(0) + "b" }),
+    });
+    expect(binary.status).toBe(400);
+
+    // upload + list
+    const up = await fetch(`${base}/api/nodes/brief/attachments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: "imported notes.md", content: "# From another project\nuse the fixture clock" }),
+    });
+    expect(up.status).toBe(200);
+    expect(((await up.json()) as { name: string }).name).toBe("imported-notes.md");
+    const list = (await (await fetch(`${base}/api/nodes/brief/attachments`)).json()) as Array<{ name: string; content: string }>;
+    expect(list).toHaveLength(1);
+    expect(list[0].content).toContain("fixture clock");
+
+    // export includes it next to the node
+    const zipText = new TextDecoder("latin1").decode(await (await fetch(`${base}/api/export.zip`)).arrayBuffer());
+    expect(zipText).toContain("mission/harness/brief-attachments/imported-notes.md");
+
+    // delete
+    expect((await fetch(`${base}/api/nodes/brief/attachments/imported-notes.md`, { method: "DELETE" })).status).toBe(200);
+    expect((await (await fetch(`${base}/api/nodes/brief/attachments`)).json()) as unknown[]).toHaveLength(0);
+    expect((await fetch(`${base}/api/nodes/brief/attachments/imported-notes.md`, { method: "DELETE" })).status).toBe(404);
+  });
+
   it("drafts node content via the node writer (fixture)", async () => {
     await fetch(`${base}/api/tree`, {
       method: "PUT",

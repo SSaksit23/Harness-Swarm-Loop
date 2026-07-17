@@ -114,3 +114,40 @@ describe("FileStore skills", () => {
     expect(store.deleteMemoryEntry(entry.name)).toBe(false);
   });
 });
+
+describe("FileStore attachments", () => {
+  it("writes, lists, and deletes per-node attachments", () => {
+    const saved = store.writeAttachment("brief", "notes from other project.md", "# Auth notes\nuse the fixture clock");
+    expect(saved.name).toBe("notes-from-other-project.md");
+    const list = store.listAttachments("brief");
+    expect(list).toHaveLength(1);
+    expect(list[0].content).toContain("fixture clock");
+    expect(store.deleteAttachment("brief", saved.name)).toBe(true);
+    expect(store.listAttachments("brief")).toHaveLength(0);
+    expect(store.deleteAttachment("brief", saved.name)).toBe(false);
+  });
+
+  it("sanitizes traversal attempts in node ids and filenames", () => {
+    const saved = store.writeAttachment("../../evil", "..\\..\\escape.md", "safe content");
+    const byNode = store.attachmentsByNode();
+    // everything stayed under arbor/attachments with safe segment names
+    expect([...byNode.keys()]).toHaveLength(1);
+    expect(saved.name.includes("..")).toBe(false);
+    expect(fs.existsSync(path.join(dir, "escape.md"))).toBe(false);
+  });
+
+  it("rejects binary and oversize content", () => {
+    expect(() => store.writeAttachment("brief", "blob.bin", "abc" + String.fromCharCode(0) + "def")).toThrow(/binary/);
+    expect(() => store.writeAttachment("brief", "huge.md", "x".repeat(300_000))).toThrow(/capped/);
+    expect(store.listAttachments("brief")).toHaveLength(0);
+  });
+
+  it("attachmentsByNode groups files for export and prompts", () => {
+    store.writeAttachment("brief", "a.md", "aaa");
+    store.writeAttachment("brief", "b.txt", "bbb");
+    store.writeAttachment("memory", "c.md", "ccc");
+    const map = store.attachmentsByNode();
+    expect(map.get("brief")!.map((a) => a.name)).toEqual(["a.md", "b.txt"]);
+    expect(map.get("memory")!.map((a) => a.name)).toEqual(["c.md"]);
+  });
+});

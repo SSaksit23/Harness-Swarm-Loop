@@ -24,6 +24,21 @@ describe("markdown export", () => {
     expect(brief.content).toContain("success_criteria");
     expect(brief.content).toContain("← `harness` (data)");
   });
+
+  it("carries per-node attachments alongside their node", () => {
+    const attachments = new Map([
+      ["brief", [{ name: "notes.md", content: "# imported notes" }]], // leaf node
+      ["harness", [{ name: "rules.txt", content: "no payments" }]], // folder node
+    ]);
+    const files = treeToMarkdownFiles(tree, attachments);
+    const byPath = new Map(files.map((f) => [f.path, f.content]));
+    expect(byPath.get("mission/harness/brief-attachments/notes.md")).toBe("# imported notes");
+    expect(byPath.get("mission/harness/attachments/rules.txt")).toBe("no payments");
+    expect(byPath.get("mission/harness/brief.md")).toContain("## Attachments");
+    expect(byPath.get("mission/harness/brief.md")).toContain("- notes.md");
+    // without the map, output is unchanged shape
+    expect(treeToMarkdownFiles(tree)).toHaveLength(tree.nodes.length + 2);
+  });
 });
 
 describe("zip builder", () => {

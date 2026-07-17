@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ArborTree, Layer, NodeType, TreeEdge, TreeNode, Violation } from "@arbor/schema";
-import { api } from "./api.js";
+import { api, type AttachmentInfo } from "./api.js";
 
 const VB = { w: 760, h: 560 };
 const H = 44;
@@ -491,7 +491,16 @@ export function Canvas() {
               return (
                 <g
                   key={node.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${node.label} (${node.type} node)`}
                   className={`node${active ? " active" : ""}${dropTarget === node.id ? " droptarget" : ""}`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelection({ kind: "node", id: node.id });
+                    }
+                  }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -587,12 +596,38 @@ function NodeInspector({
   const [draft, setDraft] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadAttachments = useCallback(() => {
+    api.attachments(node.id).then(setAttachments).catch(() => setAttachments([]));
+  }, [node.id]);
+
   useEffect(() => {
     setConfigText(JSON.stringify(node.config, null, 2));
     setConfigError(null);
     setDraft(null);
     setDraftError(null);
-  }, [node.id, node.config]);
+    setAttachError(null);
+    setPreviewing(null);
+    loadAttachments();
+  }, [node.id, node.config, loadAttachments]);
+
+  const uploadFiles = async (fileList: FileList | null) => {
+    if (!fileList?.length) return;
+    setAttachError(null);
+    for (const file of Array.from(fileList)) {
+      try {
+        const content = await file.text();
+        await api.uploadAttachment(node.id, file.name, content);
+      } catch (e) {
+        setAttachError(`${file.name}: ${(e as Error).message}`);
+      }
+    }
+    loadAttachments();
+  };
 
   const requestDraft = async () => {
     setDrafting(true);
@@ -649,6 +684,43 @@ function NodeInspector({
         <b>what goes here:</b> {TYPE_HINTS[node.type].hint}
         <div className="hintexample">e.g. {TYPE_HINTS[node.type].example}</div>
       </div>
+
+      <div className="k">attachments — upload an .md (or any text file) from another project</div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          void uploadFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <button className="btn" onClick={() => fileInputRef.current?.click()}>⇧ upload files</button>
+      {attachError && <div className="error">{attachError}</div>}
+      {attachments.map((a) => (
+        <div className="attachrow" key={a.name}>
+          <div className="attachhead">
+            <button className="attachname" onClick={() => setPreviewing(previewing === a.name ? null : a.name)} title="toggle preview">
+              {previewing === a.name ? "▾" : "▸"} {a.name}
+            </button>
+            <span className="attachsize">{a.size >= 1024 ? `${(a.size / 1024).toFixed(1)}KB` : `${a.size}B`}</span>
+            <button
+              className="attachdel"
+              title="delete attachment"
+              onClick={() => {
+                void api.deleteAttachment(node.id, a.name).then(loadAttachments).catch((e: Error) => setAttachError(e.message));
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          {previewing === a.name && <pre className="attachpreview">{a.content.slice(0, 4000)}{a.content.length > 4000 ? "\n…(preview truncated)" : ""}</pre>}
+        </div>
+      ))}
+      {attachments.length > 0 && (
+        <div className="hintexample" style={{ marginTop: 4 }}>agents and the AI writer read these automatically</div>
+      )}
 
       <div className="k">out of ideas?</div>
       <button className="btn" onClick={() => void requestDraft()} disabled={drafting}>
