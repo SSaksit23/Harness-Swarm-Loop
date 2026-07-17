@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import pc from "picocolors";
 import { criteriaFromLabels, defaultTree, validateInvariants } from "@arbor/schema";
@@ -80,6 +81,33 @@ async function stores(dir: string) {
   const memory = await openMemoryStore(files, path.basename(path.resolve(dir)));
   return { files, memory };
 }
+
+/**
+ * Load .env files (target project cwd first, then the arbor repo root) so an
+ * ANTHROPIC_API_KEY placed there actually reaches the engine. Real environment
+ * variables always win — file values never override them.
+ */
+function loadDotEnv(): void {
+  const candidates = [
+    path.join(process.cwd(), ".env"),
+    fileURLToPath(new URL("../../../.env", import.meta.url)), // arbor repo root
+  ];
+  for (const file of candidates) {
+    try {
+      const raw = fs.readFileSync(file, "utf8");
+      for (const line of raw.split(/\r?\n/)) {
+        const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+        if (!m || line.trimStart().startsWith("#")) continue;
+        const key = m[1];
+        const value = m[2].replace(/^["']|["']$/g, "");
+        if (!(key in process.env)) process.env[key] = value;
+      }
+    } catch {
+      // no .env here — fine
+    }
+  }
+}
+loadDotEnv();
 
 const program = new Command()
   .name("arbor")

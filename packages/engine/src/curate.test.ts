@@ -63,6 +63,11 @@ describe("curate", () => {
 
   it("promoted skills get mounted into the next run's prompt", async () => {
     files.writeSkill({ name: "skill-pin-clock", text: "always pin the fixture clock first", tags: ["promoted"], source_tick: 1 });
+    // an installed package skill mounts with its on-disk resource path
+    files.installSkillPackage("review-pack", [
+      { path: "SKILL.md", data: new TextEncoder().encode("---\ndescription: run checks twice\n---\nsee checklist.md") },
+      { path: "checklist.md", data: new TextEncoder().encode("- twice") },
+    ]);
 
     let prompt = "";
     const agent = new ScriptedAgent([
@@ -86,5 +91,8 @@ describe("curate", () => {
     expect(result.outcome).toBe("pass");
     expect(prompt).toContain("Skills (proven procedures");
     expect(prompt).toContain("always pin the fixture clock first");
+    expect(prompt).toContain("run checks twice");
+    expect(prompt).toContain("[full skill resources on disk:");
+    expect(prompt).toContain("review-pack");
   });
 });

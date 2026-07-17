@@ -24,6 +24,8 @@ export interface Attachment {
 /** A mounted skill: flat .md (written by curation) or an installed package folder. */
 export interface SkillEntry extends MemoryEntryFile {
   kind: "md" | "package";
+  /** Absolute folder path for package skills — agents can read the full resources there. */
+  dir?: string;
 }
 
 export const MAX_ATTACHMENT_BYTES = 262_144; // 256KB — attachments are reference text, not blobs
@@ -242,6 +244,7 @@ export class FileStore {
           source_tick: null,
           created_at: fs.statSync(skillMd).mtime.toISOString(),
           kind: "package",
+          dir: path.resolve(this.skillsDir, dirent.name),
         });
       }
     }

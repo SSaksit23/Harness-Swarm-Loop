@@ -219,7 +219,13 @@ export async function runLoop(opts: RunOptions): Promise<RunResult> {
     events.emit({ type: "stage", n: 1, label: "load context" });
     const recalledHits = await memory.recall(tree.labels.goal, 5);
     const recalled = recalledHits.map((h) => `${h.name}: ${h.text}`);
-    const skills = files.listSkills().slice(0, 5).map((s) => `${s.name}: ${s.text.slice(0, 400)}`);
+    const skills = files
+      .listSkills()
+      .slice(0, 5)
+      .map(
+        (s) =>
+          `${s.name}: ${s.text.slice(0, 400)}${s.kind === "package" && s.dir ? ` [full skill resources on disk: ${s.dir}]` : ""}`,
+      );
     const attachmentsMap = files.attachmentsByNode();
     const attachments = attachmentBlocks(tree, attachmentsMap);
     events.emit({
