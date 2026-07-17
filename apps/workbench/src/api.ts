@@ -69,6 +69,18 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ mode }),
     }),
+  compileMission: (mission: string) =>
+    jsonFetch<MissionCompileResult>("/api/plant/compile", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission }),
+    }),
+  plantMission: (labels: unknown) =>
+    jsonFetch<{ ok: boolean; goal: string }>("/api/plant", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ labels }),
+    }),
   checkin: (action: "continue" | "revise" | "stop", note?: string) =>
     jsonFetch<{ ok: boolean }>("/api/checkin", {
       method: "POST",
@@ -106,6 +118,20 @@ export const api = {
       body: JSON.stringify({ prune }),
     }),
 };
+
+export interface CompiledLabelRow {
+  field: string;
+  value: unknown;
+  confidence: number;
+  source: string | null;
+  needsConfirm: boolean;
+}
+
+export interface MissionCompileResult {
+  labels: Record<string, unknown>;
+  report: CompiledLabelRow[];
+  flagged: boolean;
+}
 
 export interface SkillInfo {
   name: string;

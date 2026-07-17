@@ -1,17 +1,24 @@
 import { useEffect, useState } from "react";
 import { api, subscribeEvents, type StatusResponse } from "./api.js";
 import { Canvas } from "./Canvas.js";
+import { Mission } from "./Mission.js";
 import { Telemetry } from "./Telemetry.js";
 import { Library } from "./Library.js";
 
-type Tab = "canvas" | "run" | "library";
+type Tab = "mission" | "canvas" | "run" | "library";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("canvas");
   const [status, setStatus] = useState<StatusResponse | null>(null);
 
   useEffect(() => {
-    void api.status().then(setStatus).catch(() => setStatus(null));
+    void api
+      .status()
+      .then((s) => {
+        setStatus(s);
+        if (!s.planted) setTab("mission"); // nothing planted yet: start at step 1
+      })
+      .catch(() => setStatus(null));
     return subscribeEvents((e) => {
       if (e.type === "run_state" || e.type === "run_end") {
         void api.status().then(setStatus).catch(() => undefined);
@@ -26,6 +33,9 @@ export function App() {
       <div className="topbar">
         <span className="brand">ARBOR</span>
         <nav className="tabs">
+          <button className={tab === "mission" ? "active" : ""} onClick={() => setTab("mission")}>
+            mission
+          </button>
           <button className={tab === "canvas" ? "active" : ""} onClick={() => setTab("canvas")}>
             canvas
           </button>
@@ -40,6 +50,13 @@ export function App() {
         <span className={`runlight ${running ? "on" : ""}`}>{running ? "running" : "idle"}</span>
       </div>
       <div className="main">
+        {tab === "mission" && (
+          <Mission
+            planted={status?.planted ?? false}
+            currentGoal={status?.goal ?? null}
+            onPlanted={() => void api.status().then(setStatus).catch(() => undefined)}
+          />
+        )}
         {tab === "canvas" && <Canvas />}
         {tab === "run" && <Telemetry running={running} budget={status?.budget ?? null} />}
         {tab === "library" && <Library />}

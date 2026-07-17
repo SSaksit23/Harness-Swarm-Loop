@@ -403,7 +403,7 @@ export function Canvas() {
   if (error && !tree) {
     return (
       <div className="empty">
-        no tree planted — run <code>arbor plant</code> first ({error})
+        no tree planted yet — describe your goal in the <b>mission</b> tab and plant it ({error})
       </div>
     );
   }

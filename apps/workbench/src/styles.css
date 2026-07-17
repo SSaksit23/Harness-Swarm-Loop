@@ -127,6 +127,17 @@ svg .port:hover { stroke: var(--ink); }
 }
 .hintbox b { color: var(--ink); }
 .hintbox .hintexample { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 4px; word-break: break-all; }
+.mission { max-width: 860px; }
+.missionhint { font-size: 13.5px; color: var(--ink-soft); margin: 4px 0 10px; max-width: 66ch; }
+.missiontext {
+  width: 100%; font-size: 14px; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; resize: vertical; line-height: 1.5;
+}
+.missiontext.mono { font-family: var(--mono); font-size: 12.5px; }
+.flagnote { color: var(--stop); font-weight: 400; text-transform: none; letter-spacing: 0; }
+tr.flagged td { background: var(--stop-soft); }
+.dim { color: var(--ink-faint); }
+
 .attachrow { margin-top: 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); }
 .attachhead { display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
 .attachname {

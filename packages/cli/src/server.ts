@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { ArborTreeSchema, buildZip, treeToMarkdownFiles, validateInvariants } from "@arbor/schema";
+import { ArborTreeSchema, MissionLabelsSchema, buildZip, defaultTree, treeToMarkdownFiles, validateInvariants } from "@arbor/schema";
 import { FileStore, openMemoryStore } from "@arbor/store";
 import {
   EventBus,
@@ -11,6 +11,7 @@ import {
   MODEL_TIERS,
   ScriptedAgent,
   SdkAgent,
+  compileLabels,
   curate,
   runLoop,
   suggestNodeText,
@@ -223,6 +224,38 @@ export function createArborServer(projectDir: string): ArborServer {
         } finally {
           await memory.close();
         }
+      }
+      if (url.pathname === "/api/plant/compile" && req.method === "POST") {
+        const body = (await readBody(req)) as { mission?: string; fixture?: boolean };
+        if (!body.mission?.trim()) return json(res, 400, { error: "mission text is required" });
+        try {
+          // one premium-model pass: plain language -> labels + confidence report
+          const result = await compileLabels(body.mission.trim(), { fixture: body.fixture });
+          return json(res, 200, result);
+        } catch (err) {
+          return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      if (url.pathname === "/api/plant" && req.method === "POST") {
+        if (running) return json(res, 409, { error: "a run is in progress — stop it before replanting" });
+        const body = (await readBody(req)) as { labels?: unknown };
+        const parsed = MissionLabelsSchema.safeParse(body.labels);
+        if (!parsed.success) {
+          return json(res, 400, {
+            error: "labels do not match the schema",
+            issues: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
+          });
+        }
+        const tree = defaultTree(parsed.data);
+        const violations = validateInvariants(tree);
+        if (violations.length) {
+          return json(res, 400, {
+            error: "compiled tree violates the control invariants",
+            issues: violations.map((v) => `[rule ${v.rule}] ${v.message}`),
+          });
+        }
+        files.writeTree(tree);
+        return json(res, 200, { ok: true, goal: parsed.data.goal });
       }
       if (url.pathname === "/api/run" && req.method === "POST") {
         const result = startRun((await readBody(req)) as RunRequest);

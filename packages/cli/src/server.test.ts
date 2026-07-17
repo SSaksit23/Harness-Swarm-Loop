@@ -195,6 +195,42 @@ describe("arbor serve", () => {
     expect((await fetch(`${base}/api/nodes/brief/attachments/imported-notes.md`, { method: "DELETE" })).status).toBe(404);
   });
 
+  it("compiles and plants a mission over the API", async () => {
+    // missing text -> 400
+    expect(
+      (await fetch(`${base}/api/plant/compile`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }))
+        .status,
+    ).toBe(400);
+
+    const compiled = await fetch(`${base}/api/plant/compile`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission: "make the test suite green, stop at $4", fixture: true }),
+    });
+    expect(compiled.status).toBe(200);
+    const result = (await compiled.json()) as { labels: Record<string, unknown>; report: unknown[]; flagged: boolean };
+    expect(result.report.length).toBeGreaterThan(3);
+    expect((result.labels.budget as { cost_ceiling_usd: number }).cost_ceiling_usd).toBe(4);
+
+    // invalid labels -> 400 with issues
+    const bad = await fetch(`${base}/api/plant`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ labels: { goal: "" } }),
+    });
+    expect(bad.status).toBe(400);
+
+    const planted = await fetch(`${base}/api/plant`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ labels: result.labels }),
+    });
+    expect(planted.status).toBe(200);
+    const status = (await (await fetch(`${base}/api/status`)).json()) as { planted: boolean; goal: string };
+    expect(status.planted).toBe(true);
+    expect(status.goal).toBe("make the test suite green");
+  });
+
   it("installs a skill package zip over the API", async () => {
     const zipBytes = buildZip([
       { path: "review/SKILL.md", content: "---\nname: review\ndescription: Review checklists.\n---\n\nAlways run the suite twice." },
